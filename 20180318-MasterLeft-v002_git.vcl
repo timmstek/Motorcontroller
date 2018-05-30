@@ -2,7 +2,7 @@
 ;					Controller Master - Master motor controller (Left)
 ;===============================================================================================
 
-; GIT: Smesh
+; GIT: Smesh_exp
 
 ; Author:	Tim Stek
 ; Organization:	TU/ecomotive
@@ -103,8 +103,8 @@ DEBOUNCE_INPUTS					constant    5		; this sets the debounce time for switch inpu
 
 ; DELAYS
 STARTUP_DELAY					constant    3000    ; time before startup system [ms]
-DELAY_BEFORE_GEAR_CHANGE        constant    0     ; Time before the actual gear change takes place
-DELAY_AFTER_GEAR_CHANGE         constant    0     ; Time after the actual gear change
+DELAY_BEFORE_GEAR_CHANGE        constant    10     ; Time before the actual gear change takes place
+DELAY_AFTER_GEAR_CHANGE         constant    10     ; Time after the actual gear change
 SMESH_FININSHED_DELAY           constant    8
 
 ; CAN Settings
@@ -454,8 +454,8 @@ SmeshRightPin_output    alias Dig7_output
 ;--------------- DELAYS -----------------
 Startup_DLY                       alias		DLY1             
 Startup_DLY_output                alias		DLY1_output
-Smesh_DLY						  alias		DLY2
-Smesh_DLY_output				  alias		DLY2_output
+Smesh_DLY						  alias		DLY10
+Smesh_DLY_output				  alias		DLY10_output
 GEAR_CHANGE_PROT_DLY			  alias		DLY3
 GEAR_CHANGE_PROT_DLY_output		  alias		DLY3_output
 EMERGENCY_ACK_DLY                 alias     DLY4
@@ -470,8 +470,6 @@ BATTERY_PEAK_DLY                  alias     DLY8
 BATTERY_PEAK_DLY_output           alias     DLY8_output
 General_DLY                       alias     DLY9
 General_DLY_output                alias     DLY9_output
-Gear_Change_DLY                   alias     DLY10
-Gear_Change_DLY_output            alias     DLY10_output
 
 FAULT_TIMER                       alias      TMR1
 FAULT_TIMER_ms_output             alias      TMR1_ms_output
@@ -1455,7 +1453,7 @@ DNRStatemachine:
     ;Setup_Delay(DLY16, 500)
     ;while (DLY16_output <> 0) {}			; Wait 500ms before start
     
-    if ( (State_GearChange >= 0x60) & (State_GearChange <= 0x6D) ) {
+    if ( (State_GearChange >= 0x60) & (State_GearChange < 0x6D) ) {
         
         ;; Changing gear to 1:6
         call setSmeshTo16
@@ -1480,7 +1478,7 @@ DNRStatemachine:
         }
         
         
-    } else if ( (State_GearChange >= 0x80) & (State_GearChange <= 0x8D) ) {
+    } else if ( (State_GearChange >= 0x80) & (State_GearChange < 0x8D) ) {
         ;; Changing gear to 1:18
         call setSmeshTo118
         
@@ -1545,8 +1543,8 @@ DNRStatemachine:
         ; Check Efficiency
         temp_Map_Output_1 = get_map_output(MAP_GEAR118, Motor_RPM)
         
-        ;if ( (Motor_RPM > 1500) & (GEAR_CHANGE_PROT_DLY_output = 0) ) {
-        ;    ; 1:6 is more efficient, so switch to 1:6 ; (Motor_Torque < temp_Map_Output_1)
+        ;if ( (Motor_Torque < temp_Map_Output_1) & (GEAR_CHANGE_PROT_DLY_output = 0) ) {
+        ;    ; 1:6 is more efficient, so switch to 1:6
         ;    
         ;    State_GearChange = 0x60
         ;    
@@ -1586,8 +1584,8 @@ DNRStatemachine:
         ; Check Efficiency
         temp_Map_Output_1 = get_map_output(MAP_GEAR16, Motor_RPM)
         
-        if ( (Motor_RPM < 1400) & (GEAR_CHANGE_PROT_DLY_output = 0) ) {
-            ; 1:18 is more efficient, so switch to 1:18 ; (Motor_Torque > temp_Map_Output_1)
+        if ( (Motor_Torque > temp_Map_Output_1) & (GEAR_CHANGE_PROT_DLY_output = 0) ) {
+            ; 1:18 is more efficient, so switch to 1:18
             
             State_GearChange = 0x80
             
@@ -1649,9 +1647,9 @@ DNRStatemachine:
         } else {
             ; set gear to 1:18 and go to drive state
             State_GearChange = 0x80
-            ; call setSmeshTo118
+            call setSmeshTo118
             
-            if (State_GearChange = 0x80) {
+            if (State_GearChange = 0x8D) {
                 ; When gear change is not aborted, change state
                 fault_CNT_GearChange = 0
                 HPO = 1                     ; Initialize High Pedal, cleared when throttle is below threshold
@@ -1813,7 +1811,7 @@ setSmeshTo16:
             ; Right controller has changed throttle
             State_GearChange = 0x64
             
-            setup_delay(Gear_Change_DLY, DELAY_BEFORE_GEAR_CHANGE)
+            ;setup_delay(SMESH_DLY, DELAY_BEFORE_GEAR_CHANGE)
         } else if (Smesh_DLY_output = 0) {
             ; It takes too much time to change gear
             State_GearChange = 0xFF
@@ -1825,19 +1823,19 @@ setSmeshTo16:
     
     ;;;;; 5. Switch gear to 1:6
     
-    if ( (State_GearChange = 0x64) & (Gear_Change_DLY_output = 0) ) {
+    if ( (State_GearChange = 0x64) ) {      ; & (SMESH_DLY_output = 0)
         ; 16 OFF(clear); 118 ON(set)
         clear_DigOut(SmeshLeftPin)                          ; Change gear to 1:6
         State_GearChange = 0x65
         
-        setup_delay(Gear_Change_DLY, DELAY_AFTER_GEAR_CHANGE)
+        ;setup_delay(SMESH_DLY, DELAY_AFTER_GEAR_CHANGE)
         
     }
     
     
     ;;;;; 6. Reduce throttle right controller
     
-    if ( (State_GearChange = 0x65) & (Gear_Change_DLY_output = 0) ) {
+    if ( (State_GearChange = 0x65) ) {      ;& (SMESH_DLY_output = 0) 
         
         temp_Map_Output_1 = Map_Two_Points(RCV_Throttle, 0, 255, 0, 32767)
         RM_Throttle_Compensated = get_muldiv(MTD1, THROTTLE_MULTIP_REDUCE, temp_Map_Output_1, 128)
@@ -1871,26 +1869,26 @@ setSmeshTo16:
         Drive_Current_Limit = get_muldiv(MTD1, THROTTLE_MULTIP_INCREASE, temp_Drive_Current_Limit, 128)
         State_GearChange = 0x68
         
-        setup_delay(Gear_Change_DLY, DELAY_BEFORE_GEAR_CHANGE)
+        ;setup_delay(SMESH_DLY, DELAY_BEFORE_GEAR_CHANGE)
         
     }
         
     
     ;;;;; 10. receive ACK from controller: procedure has started
     
-    if ( (State_GearChange = 0x68) & (Gear_Change_DLY_output = 0) ) {
+    if ( (State_GearChange = 0x68) ) {      ; & (SMESH_DLY_output = 0) 
         ; 16 OFF(clear); 118 ON(set)
         clear_DigOut(SmeshRightPin)                          ; Change gear to 1:6
         State_GearChange = 0x6A
         
-        setup_delay(Gear_Change_DLY, DELAY_AFTER_GEAR_CHANGE)
+        setup_delay(SMESH_DLY, DELAY_AFTER_GEAR_CHANGE)
         
     }
         
 
     ;;;;; 11. reduce left throttle to normal
     
-    if ( (State_GearChange = 0x6A) & (Gear_Change_DLY_output = 0) ) {
+    if ( (State_GearChange = 0x6A) ) {      ; & (SMESH_DLY_output = 0) 
         VCL_Throttle = Map_Two_Points(RCV_Throttle, 0, 255, 0, 32767)
         Drive_Current_Limit = temp_Drive_Current_Limit
         State_GearChange = 0x6B
@@ -1990,9 +1988,6 @@ setSmeshTo118:
         ;while (DLY16_output <> 0) {}			; Wait 500ms before start
         
         State_GearChange = 0x8C
-        
-        send_mailbox(MAILBOX_SM_MOSI3)
-        Setup_Delay(Smesh_DLY, CAN_DELAY_FOR_ACK)
     }
 
     
@@ -2049,7 +2044,7 @@ setSmeshTo118:
             ; Right controller has changed throttle
             State_GearChange = 0x84
             
-            setup_delay(Gear_Change_DLY, DELAY_BEFORE_GEAR_CHANGE)
+            ;setup_delay(Smesh_DLY, DELAY_BEFORE_GEAR_CHANGE)
         } else if (Smesh_DLY_output = 0) {
             ; It takes too much time to change gear
             State_GearChange = 0xFF
@@ -2061,20 +2056,20 @@ setSmeshTo118:
     
     ;;;;; 5. Switch gear to 1:18
     
-    if ( (State_GearChange = 0x84) & (Gear_Change_DLY_output = 0) ) {      
-        ; 16 OFF(clear); 118 ON(set)
+    if ( (State_GearChange = 0x84) ) {      
+        ; 16 OFF(clear); 118 ON(set) ;& (Smesh_DLY_output = 0) 
         set_DigOut(SmeshLeftPin)                          ; Change gear to 1:18
         State_GearChange = 0x85
         
-        setup_delay(Gear_Change_DLY, DELAY_AFTER_GEAR_CHANGE)
+        ;setup_delay(Smesh_DLY, DELAY_AFTER_GEAR_CHANGE)
         
     }
         
         
     ;;;;; 6. Reduce throttle right controller
     
-    if ( (State_GearChange = 0x85) & (Gear_Change_DLY_output = 0) ) {       
-        temp_Map_Output_1 = Map_Two_Points(RCV_Throttle, 0, 255, 0, 32767)
+    if ( (State_GearChange = 0x85) ) {       
+        temp_Map_Output_1 = Map_Two_Points(RCV_Throttle, 0, 255, 0, 32767) ;& (Smesh_DLY_output = 0) 
         RM_Throttle_Compensated = get_muldiv(MTD1, THROTTLE_MULTIP_REDUCE, temp_Map_Output_1, 128)
         RM_Drive_Current_Limit = temp_Drive_Current_Limit
         State_GearChange = 0x86
@@ -2105,27 +2100,27 @@ setSmeshTo118:
         Drive_Current_Limit = get_muldiv(MTD1, THROTTLE_MULTIP_INCREASE, temp_Drive_Current_Limit, 128)
         State_GearChange = 0x88
         
-        setup_delay(Gear_Change_DLY, DELAY_BEFORE_GEAR_CHANGE)
+        ;setup_delay(SMESH_DLY, DELAY_BEFORE_GEAR_CHANGE)
         
     }
         
     
     ;;;;; 10. receive ACK from controller: procedure has started
     
-    if ( (State_GearChange = 0x88) & (Gear_Change_DLY_output = 0) ) {
-        ; 16 OFF(clear); 118 ON(set)
+    if ( (State_GearChange = 0x88) ) {
+        ; 16 OFF(clear); 118 ON(set) ; & (SMESH_DLY_output = 0) 
         set_DigOut(SmeshRightPin)                          ; Change gear to 1:18
         State_GearChange = 0x8A
         
-        setup_delay(Gear_Change_DLY, DELAY_AFTER_GEAR_CHANGE)
+        ;setup_delay(SMESH_DLY, DELAY_AFTER_GEAR_CHANGE)
         
     }
         
 
     ;;;;; 11. reduce left throttle to normal
     
-    if ( (State_GearChange = 0x8A) & (Gear_Change_DLY_output = 0) ) {
-        VCL_Throttle = Map_Two_Points(RCV_Throttle, 0, 255, 0, 32767)
+    if ( (State_GearChange = 0x8A) ) {
+        VCL_Throttle = Map_Two_Points(RCV_Throttle, 0, 255, 0, 32767) ; & (SMESH_DLY_output = 0) 
         Drive_Current_Limit = temp_Drive_Current_Limit
         State_GearChange = 0x8B
         
@@ -2167,6 +2162,9 @@ setSmeshTo118:
         
         Setup_Delay(GEAR_CHANGE_PROT_DLY, PROTECTION_DELAY_GRCHANGE)
     }
+    
+    ;Setup_Delay(General_DLY, SMESH_FININSHED_DELAY)
+    ;while (General_DLY_output <> 0) {}
     
     
     

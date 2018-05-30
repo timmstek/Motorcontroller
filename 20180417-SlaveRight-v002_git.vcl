@@ -2,7 +2,7 @@
 ;					Controller Slave - Slave motor controller (Right)
 ;===============================================================================================
 
-; GIT: Smesh
+; GIT: Smesh_exp
 
 ; Author:	Tim Stek
 ; Organization:	TU/ecomotive
@@ -56,7 +56,6 @@ Battery_Current_Limit_Ramp_Rate = 1
 Battery_Current_Limiter_enable = 1
 Battery_Power_Limit = 20                ; per 10W
 ;; Regen_Battery_Current_Limit
-;; Motor_Power
 
 RESET_PASSWORD                  constant 141        ; password for "reset_controller_remote" to reset controller
 
@@ -67,11 +66,10 @@ CAN_EMERGENCY_DELAY_ACK         constant    50      ; Amount of time system wait
 CAN_CYCLIC_RATE					constant    25	    ; this sets the cyclic cycle to every 100 ms, 4mS/unit
 
 ; Timers
-MAX_TIME_GEARCHANGE			    constant    5000    ; Maximum time gear change may take [ms] (normally 70ms + delays)
+MAX_TIME_GEARCHANGE			    constant    2000    ; Maximum time gear change may take [ms] (normally 70ms + delays)
 STARTUP_DELAY                   constant    3000    ; Delay before system starts up [ms]
-Main_Loop_Rate                  constant    10
 CAN_NOTHING_RECEIVE_SHUTDOWN_TIME constant  500     ; If slave does receive nothing for this amount of time, interlock turns off [ms]
-SMESH_FININSHED_DELAY           constant    20      ;
+SMESH_FININSHED_DELAY           constant    10      ;
 
 ; DNR, Throttle and Brake
 FULL_BRAKE                      constant    32767   ; On a scale of 0-32767, how hard controller will brake
@@ -235,10 +233,8 @@ CAN_INIT_ACK_DLY                  alias     DLY4
 CAN_INIT_ACK_DLY_output           alias     DLY4_output
 CAN_RCV_MASTER_DLY                alias     DLY5
 CAN_RCV_MASTER_DLY_output         alias     DLY5_output
-General_DLY                       alias     DLY6
-General_DLY_output                alias     DLY6_output
-Main_Loop_DLY                     alias     DLY7
-Main_Loop_DLY_output              alias     DLY7_output
+General_DLY                       alias     DLY4
+General_DLY_output                alias     DLY4_output
 
 
 
@@ -283,8 +279,7 @@ call startup_CAN_System 		;setup and start the CAN communications system
 
 Mainloop:
     
-    setup_delay(Main_Loop_DLY, Main_Loop_Rate)
-    while (Main_Loop_DLY_output <> 0) {}
+    Setup_Delay(DLY11, 10)
     
     if (reset_controller_remote = RESET_PASSWORD) {
         Reset_Controller()
@@ -292,17 +287,12 @@ Mainloop:
     
     call CheckCANMailboxes
     
-    setup_delay(Main_Loop_DLY, Main_Loop_Rate)
-    while (Main_Loop_DLY_output <> 0) {}
-    
     call DNR_statemachine
-    
-    setup_delay(Main_Loop_DLY, Main_Loop_Rate)
-    while (Main_Loop_DLY_output <> 0) {}
     
     call faultHandling
     
     
+    while (DLY11_output <> 0) {}			; Wait 100ms before start
     
     
     goto Mainloop 
@@ -723,7 +713,6 @@ DNR_statemachine:
 
     ; STATE MACHINE
     
-    
     if ((Interlock_RCV = 1)) {
         ; Turn car 'on'
         if ((Interlock_State = OFF)) {
@@ -755,15 +744,14 @@ DNR_statemachine:
     }
     
     
-    if ( (RCV_State_GearChange >= 0x60) & (RCV_State_GearChange < 0x6D) ) {
+    if ( (RCV_State_GearChange >= 0x60) & (RCV_State_GearChange <= 0x6D) ) {
         ;; Changing gear to 1:6
         call setSmeshTo16
         
         exit
         
-    } else if ( (RCV_State_GearChange >= 0x80) & (RCV_State_GearChange < 0x8D) ) {
+    } else if ( (RCV_State_GearChange >= 0x80) & (RCV_State_GearChange <= 0x8D) ) {
         ;; Changing gear to 1:18
-        
         call setSmeshTo118
         
         exit
@@ -793,7 +781,6 @@ DNR_statemachine:
         
         State_GearChange = 0x01
     }
-    
     
     VCL_Throttle = temp_VCL_Throttle
 
@@ -942,7 +929,6 @@ setSmeshTo118:
     
     if ( (RCV_State_GearChange = 0x8C) & (State_GearChange <> 0x8D) ) {
         VCL_Throttle = RCV_Throttle_Compensated
-        
         
         
     ;;;;; 13. Change is successful, thus speed_to_RPM can be changed
