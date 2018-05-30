@@ -493,8 +493,8 @@ faultHandling:
     }
     
     ; Set current limits to the correct values
-    Drive_Current_Limit = temp_Drive_Current_Limit
-    Regen_Current_Limit = temp_Regen_Current_Limit
+    Drive_Current_Limit = RCV_Drive_Current_Limit
+    Regen_Current_Limit = RCV_Regen_Current_Limit
     
     ; Set Regen limits correct
     Brake_Current_Limit = Regen_Current_Limit

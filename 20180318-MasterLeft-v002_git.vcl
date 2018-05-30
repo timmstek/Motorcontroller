@@ -83,7 +83,7 @@ VCL_App_Ver = 012
 ; Input Current Limits
 Battery_Current_Limit_Ramp_Rate = 1
 Battery_Current_Limiter_enable = 1
-Battery_Power_Limit = 20                ; per 10W
+
 ;; Regen_Battery_Current_Limit
 ;; Motor_Power
 
@@ -108,6 +108,11 @@ CONTR_TEMP_FAN_MAX              constant    75
 FANSPEED_IDLE                   constant    10      ; In idle mode, fans will always run at 10%
 
 ; Current settings
+Battery_Power_Limit_Init        constant    20      ; per 10W
+
+INIT_DRIVE_OUTPUT_CURLIM         constant   28086        ; 300A  /350A*32767
+INIT_REGEN_OUTPUT_CURLIM         constant   5617         ; 60A  /350A*32767
+
 REDUCED_DRIVE_INPUT_CURLIM_PERC constant    60      ; Drive current limit is 60%, when fault is detected
 REDUCED_REGEN_INPUT_CURLIM_PERC constant    15      ; Regen current limit is 15%, when fault is detected
 REDUCED_THROTTLE_MULTIPLIER     constant    75      ; 60% of 128 = 75
@@ -249,9 +254,7 @@ create Batt_ErrorMSG4 variable                      ; Battery fault bits #4
 
 
 ; Efficiency calculation
-AVG_Efficiency                    alias      user10     ; Average Efficiency of left and right controller
-LM_Efficiency                     alias      user11     ; Left controller Efficiency
-RCV_RM_Efficiency                 alias      user12     ; Right controller Efficiency
+Efficiency                        alias      user10     ; Average Efficiency of left and right controller
 Power_In                          alias      user13     ; Input Power
 Power_Out                         alias      user14     ; Ouput Power
 Motor_Rads                        alias      user15     ; Rotor speed [rad/s]
@@ -273,7 +276,7 @@ RM_Drive_Current_Limit            alias      user31     ; Drive current limit fo
 RM_Throttle_Compensated           alias      user40           			; Torque for right motorcontroller, command to Right controller
 DNR_Command                       alias      user41           			; DNR command to Right controller
 RCV_DNR_Command                   alias      user42           			; DNR command Received from switch
-Throttle_RCV                      alias      user43           			; Throttle pedal state
+RCV_Throttle                      alias      user43           			; Throttle pedal state
 Brake_RCV                         alias      user44           			; Brake pedal pushed
 fault_CNT_GearChange              alias      user45                     ; Counts number of times gear change has fault    
 
@@ -473,10 +476,12 @@ call setup_2D_MAP
 
 MAX_STEER_COMPENSATION = INIT_STEER_COMPENSATION            ; 120/255 = 47% reduction on inner wheel with max steering
 
+Battery_Power_Limit = Battery_Power_Limit_Init
+
 ; For testing purposes
 Steerangle_VCL = 125
 RCV_Key_Switch = 1
-Throttle_RCV = 0
+RCV_Throttle = 0
 
 
 
@@ -685,7 +690,7 @@ startupCANSystem:
 
     Setup_Mailbox(MAILBOX_DRVSEN_RCV, 0, 0, 0x011, C_EVENT, C_RCV, 0, 0)
     Setup_Mailbox_Data(MAILBOX_DRVSEN_RCV, 1, 		; Efficiency
-        @Throttle_RCV,					; Throttle pedal
+        @RCV_Throttle,					; Throttle pedal
         0,
 		0,
 		0,
@@ -971,7 +976,7 @@ faultHandling:
         temp_Map_Output_1 = Map_Two_Points(FAULT_RAMP_output, 0, TIME_TO_FULL_LOS_FAULT, 100, REDUCED_REGEN_INPUT_CURLIM_PERC)
         
         
-        Regen_Current_Limit = Map_Two_Points(temp_Map_Output_1, 0, 100, 1638, temp_Regen_Current_Limit)
+        Regen_Current_Limit = Map_Two_Points(temp_Map_Output_1, 0, 100, 1638, INIT_REGEN_OUTPUT_CURLIM)
         Brake_Current_Limit = Regen_Current_Limit
         Interlock_Brake_Current_Limit = Regen_Current_Limit
         
@@ -986,7 +991,7 @@ faultHandling:
 
         temp_Map_Output_1 = Map_Two_Points(FAULT_RAMP_output, 0, TIME_TO_FULL_LOS_FAULT, 100, REDUCED_DRIVE_INPUT_CURLIM_PERC)
 
-        Drive_Current_Limit = Map_Two_Points(temp_Map_Output_1, 0, 100, 1638, temp_Drive_Current_Limit)
+        Drive_Current_Limit = Map_Two_Points(temp_Map_Output_1, 0, 100, 1638, INIT_DRIVE_OUTPUT_CURLIM)
         RM_Drive_Current_Limit = Drive_Current_Limit
         
     }
@@ -999,9 +1004,9 @@ faultHandling:
         temp_Map_Output_1 = Map_Two_Points(FAULT_RAMP_output, 0, TIME_TO_FULL_LOS_FAULT, 100, REDUCED_REGEN_INPUT_CURLIM_PERC)
         temp_Map_Output_2 = Map_Two_Points(FAULT_RAMP_output, 0, TIME_TO_FULL_LOS_FAULT, 100, REDUCED_DRIVE_INPUT_CURLIM_PERC)
         
-        Drive_Current_Limit = Map_Two_Points(temp_Map_Output_1, 0, 100, 1638, temp_Drive_Current_Limit)
+        Drive_Current_Limit = Map_Two_Points(temp_Map_Output_1, 0, 100, 1638, INIT_DRIVE_OUTPUT_CURLIM)
         
-        Regen_Current_Limit = Map_Two_Points(temp_Map_Output_1, 0, 100, 1638, temp_Regen_Current_Limit)
+        Regen_Current_Limit = Map_Two_Points(temp_Map_Output_1, 0, 100, 1638, INIT_REGEN_OUTPUT_CURLIM)
         Brake_Current_Limit = Regen_Current_Limit
         Interlock_Brake_Current_Limit = Regen_Current_Limit
         
@@ -1018,9 +1023,9 @@ faultHandling:
         temp_Map_Output_1 = Map_Two_Points(FAULT_RAMP_output, 0, TIME_TO_FULL_LOS_FAULT, 100, REDUCED_REGEN_INPUT_CURLIM_PERC)
         temp_Map_Output_2 = Map_Two_Points(FAULT_RAMP_output, 0, TIME_TO_FULL_LOS_FAULT, 100, REDUCED_DRIVE_INPUT_CURLIM_PERC)
         
-        Drive_Current_Limit = Map_Two_Points(temp_Map_Output_1, 0, 100, 1638, temp_Drive_Current_Limit)
+        Drive_Current_Limit = Map_Two_Points(temp_Map_Output_1, 0, 100, 1638, INIT_DRIVE_OUTPUT_CURLIM)
         
-        Regen_Current_Limit = Map_Two_Points(temp_Map_Output_1, 0, 100, 1638, temp_Regen_Current_Limit)
+        Regen_Current_Limit = Map_Two_Points(temp_Map_Output_1, 0, 100, 1638, INIT_REGEN_OUTPUT_CURLIM)
         Brake_Current_Limit = Regen_Current_Limit
         Interlock_Brake_Current_Limit = Regen_Current_Limit
         
@@ -1037,15 +1042,15 @@ faultHandling:
         
         Throttle_Multiplier = 128
         
-        Drive_Current_Limit = temp_Drive_Current_Limit
+        Drive_Current_Limit = INIT_DRIVE_OUTPUT_CURLIM
         
-        Regen_Current_Limit = temp_Regen_Current_Limit
-        Brake_Current_Limit = temp_Regen_Current_Limit
-        Interlock_Brake_Current_Limit = temp_Regen_Current_Limit
+        Regen_Current_Limit = INIT_REGEN_OUTPUT_CURLIM
+        Brake_Current_Limit = INIT_REGEN_OUTPUT_CURLIM
+        Interlock_Brake_Current_Limit = INIT_REGEN_OUTPUT_CURLIM
         
         ; When there are no faults, let the controller determine it's own current limits
-        RM_Drive_Current_Limit = 0
-        RM_Regen_Current_Limit = 0
+        RM_Drive_Current_Limit = INIT_DRIVE_OUTPUT_CURLIM
+        RM_Regen_Current_Limit = INIT_REGEN_OUTPUT_CURLIM
     }
     
     if ( (System_Action <> 0) | (Fault_System <> 0) | (RM_Fault_System <> 0) | (Fault_System_Battery <> 0) ) {
@@ -1187,7 +1192,7 @@ calculateEfficiency:
     
     Power_Out = Motor_Torque * Motor_Rads               ; Motor_Torque ; Motor_RPM -12000-12000rpm (-12000-12000) [W]
     
-    AVG_Efficiency = (LM_Efficiency + RCV_RM_Efficiency)/2
+    Efficiency = LM_Efficiency
     return
     
 
@@ -1217,7 +1222,7 @@ DNRStatemachine:
     
     if (Brake_RCV = 1) {
         VCL_Brake = FULL_BRAKE   ; Map_Two_Points(100, 0, 100, 0, 32767)
-        ;Throttle_RCV = 0
+        ;RCV_Throttle = 0
     } else {
         VCL_Brake = 0
     }
@@ -1307,13 +1312,13 @@ DNRStatemachine:
         ; if efficency is wrong switch gear to 16
         
         if ( HPO = 0 ) {
-            temp_VCL_Throttle = Map_Two_Points(Throttle_RCV, 0, 255, 0, 32767)     ; Set throttle to position of pedal
-        } else if ( Throttle_RCV >= HIGH_PEDAL_DISABLE_THRESHOLD ) {
+            temp_VCL_Throttle = Map_Two_Points(RCV_Throttle, 0, 255, 0, 32767)     ; Set throttle to position of pedal
+        } else if ( RCV_Throttle >= HIGH_PEDAL_DISABLE_THRESHOLD ) {
             temp_VCL_Throttle = 0
         } else {
             ; HPO is still 1 and throttle is below threshold
             HPO = 0
-            temp_VCL_Throttle = Map_Two_Points(Throttle_RCV, 0, 255, 0, 32767)     ; Set throttle to position of pedal
+            temp_VCL_Throttle = Map_Two_Points(RCV_Throttle, 0, 255, 0, 32767)     ; Set throttle to position of pedal
         }
         
         
@@ -1349,13 +1354,13 @@ DNRStatemachine:
         ; if efficency is wrong switch gear to 118
         
         if ( HPO = 0 ) {
-            temp_VCL_Throttle = Map_Two_Points(Throttle_RCV, 0, 255, 0, 32767)     ; Set throttle to position of pedal
-        } else if ( Throttle_RCV >= HIGH_PEDAL_DISABLE_THRESHOLD ) {
+            temp_VCL_Throttle = Map_Two_Points(RCV_Throttle, 0, 255, 0, 32767)     ; Set throttle to position of pedal
+        } else if ( RCV_Throttle >= HIGH_PEDAL_DISABLE_THRESHOLD ) {
             temp_VCL_Throttle = 0
         } else {
             ; HPO is still 1 and throttle is below threshold
             HPO = 0
-            temp_VCL_Throttle = Map_Two_Points(Throttle_RCV, 0, 255, 0, 32767)     ; Set throttle to position of pedal
+            temp_VCL_Throttle = Map_Two_Points(RCV_Throttle, 0, 255, 0, 32767)     ; Set throttle to position of pedal
         }
         
         ; Check Efficiency
@@ -1386,14 +1391,14 @@ DNRStatemachine:
     } else if (state_DNR = REVERSE) {
         
         if ( HPO = 0 ) {
-            temp_Map_Output_1 = Map_Two_Points(Throttle_RCV, 0, 255, 0, -32767)
+            temp_Map_Output_1 = Map_Two_Points(RCV_Throttle, 0, 255, 0, -32767)
             temp_VCL_Throttle = get_muldiv(MTD1, temp_Map_Output_1, REVERSE_THROTTLE_MULTIPLIER, 128)     ; Set throttle to position of pedal
-        } else if ( Throttle_RCV >= HIGH_PEDAL_DISABLE_THRESHOLD ) {
+        } else if ( RCV_Throttle >= HIGH_PEDAL_DISABLE_THRESHOLD ) {
             temp_VCL_Throttle = 0
         } else {
             ; HPO is still 1 and throttle is below threshold
             HPO = 0
-            temp_Map_Output_1 = Map_Two_Points(Throttle_RCV, 0, 255, 0, -32767)
+            temp_Map_Output_1 = Map_Two_Points(RCV_Throttle, 0, 255, 0, -32767)
             temp_VCL_Throttle = get_muldiv(MTD1, temp_Map_Output_1, REVERSE_THROTTLE_MULTIPLIER, 128)     ; Set throttle to position of pedal
         }
         
@@ -1494,8 +1499,8 @@ DNRStatemachine:
     }
     
     VCL_Throttle = get_muldiv(MTD1, temp_VCL_Throttle, L_Steering_Multiplier, 255)
-    temp_Calculation = get_muldiv(MTD1, temp_VCL_Throttle, R_Steering_Multiplier, 255)
-    RM_Throttle_Compensated = get_muldiv(MTD1, temp_Calculation, Throttle_Multiplier, 128)
+    temp_Calculation = get_muldiv(MTD2, temp_VCL_Throttle, R_Steering_Multiplier, 255)
+    RM_Throttle_Compensated = get_muldiv(MTD3, temp_Calculation, Throttle_Multiplier, 128)
     
     
     ; Set right DNR equal to left DNR
@@ -1531,7 +1536,7 @@ setSmeshTo16:
     ;;;;; 1. Reduce left throttle
     
     if (State_GearChange = 0x60) {
-        temp_Map_Output_1 = Map_Two_Points(Throttle_RCV, 0, 255, 0, 32767)
+        temp_Map_Output_1 = Map_Two_Points(RCV_Throttle, 0, 255, 0, 32767)
         VCL_Throttle = get_muldiv(MTD1, THROTTLE_MULTIP_REDUCE, temp_Map_Output_1, 128)
         State_GearChange = 0x61
         
@@ -1563,7 +1568,7 @@ setSmeshTo16:
         
     ;;;;; 3. multiply throttle of right controller with 2
     if (State_GearChange = 0x62) {
-        temp_Map_Output_1 = Map_Two_Points(Throttle_RCV, 0, 255, 0, 32767)
+        temp_Map_Output_1 = Map_Two_Points(RCV_Throttle, 0, 255, 0, 32767)
         RM_Throttle_Compensated = get_muldiv(MTD1, THROTTLE_MULTIP_INCREASE, temp_Map_Output_1, 128)
         RM_Drive_Current_Limit = get_muldiv(MTD1, THROTTLE_MULTIP_INCREASE, temp_Drive_Current_Limit, 128)
         State_GearChange = 0x63
@@ -1598,7 +1603,7 @@ setSmeshTo16:
         
         
     ;;;;; 6. Reduce throttle right controller
-        temp_Map_Output_1 = Map_Two_Points(Throttle_RCV, 0, 255, 0, 32767)
+        temp_Map_Output_1 = Map_Two_Points(RCV_Throttle, 0, 255, 0, 32767)
         RM_Throttle_Compensated = get_muldiv(MTD1, THROTTLE_MULTIP_REDUCE, temp_Map_Output_1, 128)
         RM_Drive_Current_Limit = temp_Drive_Current_Limit
         State_GearChange = 0x66
@@ -1624,7 +1629,7 @@ setSmeshTo16:
     
     ;;;;; 8. Increase left throttle
     if (State_GearChange = 0x67) {
-        temp_Map_Output_1 = Map_Two_Points(Throttle_RCV, 0, 255, 0, 32767)
+        temp_Map_Output_1 = Map_Two_Points(RCV_Throttle, 0, 255, 0, 32767)
         VCL_Throttle = get_muldiv(MTD1, THROTTLE_MULTIP_INCREASE, temp_Map_Output_1, 128)
         Drive_Current_Limit = get_muldiv(MTD1, THROTTLE_MULTIP_INCREASE, temp_Drive_Current_Limit, 128)
         State_GearChange = 0x68
@@ -1640,14 +1645,14 @@ setSmeshTo16:
     
     ;;;;; 11. reduce left throttle to normal
 
-        VCL_Throttle = Map_Two_Points(Throttle_RCV, 0, 255, 0, 32767)
+        VCL_Throttle = Map_Two_Points(RCV_Throttle, 0, 255, 0, 32767)
         Drive_Current_Limit = temp_Drive_Current_Limit
         State_GearChange = 0x6B
         
         
     ;;;;; 12. increase throttle right controller to normal
         
-        RM_Throttle_Compensated = Map_Two_Points(Throttle_RCV, 0, 255, 0, 32767)
+        RM_Throttle_Compensated = Map_Two_Points(RCV_Throttle, 0, 255, 0, 32767)
         State_GearChange = 0x6C
         send_mailbox(MAILBOX_SM_MOSI3)
         
@@ -1687,8 +1692,8 @@ setSmeshTo16:
         ;
         ;Drive_Current_Limit = temp_Drive_Current_Limit
         ;RM_Drive_Current_Limit = temp_Drive_Current_Limit
-        ;VCL_Throttle = get_muldiv(MTD1, THROTTLE_MULTIP_REDUCE, Throttle_RCV, 128)
-        ;RM_Throttle_Compensated = Throttle_RCV
+        ;VCL_Throttle = get_muldiv(MTD1, THROTTLE_MULTIP_REDUCE, RCV_Throttle, 128)
+        ;RM_Throttle_Compensated = RCV_Throttle
         ;
         ;send_mailbox(MAILBOX_SM_MOSI3)
         ;
@@ -1697,7 +1702,7 @@ setSmeshTo16:
        ; 
         ;if (RCV_State_GearChange = 0xFF) {
         ;    ; Slave accepts mission abort, reset left throttle
-        ;    VCL_Throttle = Throttle_RCV
+        ;    VCL_Throttle = RCV_Throttle
         ;} else {
         ;    ; Serious CAN problems, turn off throttle
         ;    RM_Throttle_Compensated = 0
@@ -1731,7 +1736,7 @@ setSmeshTo118:
     ;;;;; 1. Reduce left throttle
     
     if (State_GearChange = 0x80) {
-        temp_Map_Output_1 = Map_Two_Points(Throttle_RCV, 0, 255, 0, 32767)
+        temp_Map_Output_1 = Map_Two_Points(RCV_Throttle, 0, 255, 0, 32767)
         VCL_Throttle = get_muldiv(MTD1, THROTTLE_MULTIP_REDUCE, temp_Map_Output_1, 128)
         State_GearChange = 0x81
         
@@ -1763,7 +1768,7 @@ setSmeshTo118:
         
     ;;;;; 3. multiply throttle of right controller with 2
     if (State_GearChange = 0x82) {
-        temp_Map_Output_1 = Map_Two_Points(Throttle_RCV, 0, 255, 0, 32767)
+        temp_Map_Output_1 = Map_Two_Points(RCV_Throttle, 0, 255, 0, 32767)
         RM_Throttle_Compensated = get_muldiv(MTD1, THROTTLE_MULTIP_INCREASE, temp_Map_Output_1, 128)
         RM_Drive_Current_Limit = get_muldiv(MTD1, THROTTLE_MULTIP_INCREASE, temp_Drive_Current_Limit, 128)
         State_GearChange = 0x83
@@ -1798,7 +1803,7 @@ setSmeshTo118:
         
         
     ;;;;; 6. Reduce throttle right controller
-        temp_Map_Output_1 = Map_Two_Points(Throttle_RCV, 0, 255, 0, 32767)
+        temp_Map_Output_1 = Map_Two_Points(RCV_Throttle, 0, 255, 0, 32767)
         RM_Throttle_Compensated = get_muldiv(MTD1, THROTTLE_MULTIP_REDUCE, temp_Map_Output_1, 128)
         RM_Drive_Current_Limit = temp_Drive_Current_Limit
         State_GearChange = 0x86
@@ -1824,7 +1829,7 @@ setSmeshTo118:
     
     ;;;;; 8. Increase left throttle
     if (State_GearChange = 0x87) {
-        temp_Map_Output_1 = Map_Two_Points(Throttle_RCV, 0, 255, 0, 32767)
+        temp_Map_Output_1 = Map_Two_Points(RCV_Throttle, 0, 255, 0, 32767)
         VCL_Throttle = get_muldiv(MTD1, THROTTLE_MULTIP_INCREASE, temp_Map_Output_1, 128)
         Drive_Current_Limit = get_muldiv(MTD1, THROTTLE_MULTIP_INCREASE, temp_Drive_Current_Limit, 128)
         State_GearChange = 0x88
@@ -1837,14 +1842,14 @@ setSmeshTo118:
         
 
     ;;;;; 11. reduce left throttle to normal
-        VCL_Throttle = Map_Two_Points(Throttle_RCV, 0, 255, 0, 32767)
+        VCL_Throttle = Map_Two_Points(RCV_Throttle, 0, 255, 0, 32767)
         Drive_Current_Limit = temp_Drive_Current_Limit
         State_GearChange = 0x8B
         
         
     ;;;;; 12. increase throttle right controller to normal
         
-        RM_Throttle_Compensated = Map_Two_Points(Throttle_RCV, 0, 255, 0, 32767)
+        RM_Throttle_Compensated = Map_Two_Points(RCV_Throttle, 0, 255, 0, 32767)
         State_GearChange = 0x8C
         
         send_mailbox(MAILBOX_SM_MOSI3)
@@ -1899,8 +1904,8 @@ setSmeshTo118:
         ;
         ;Drive_Current_Limit = temp_Drive_Current_Limit
         ;RM_Drive_Current_Limit = temp_Drive_Current_Limit
-        ;VCL_Throttle = get_muldiv(MTD1, THROTTLE_MULTIP_REDUCE, Throttle_RCV, 128)
-        ;RM_Throttle_Compensated = Throttle_RCV
+        ;VCL_Throttle = get_muldiv(MTD1, THROTTLE_MULTIP_REDUCE, RCV_Throttle, 128)
+        ;RM_Throttle_Compensated = RCV_Throttle
         ;
         ;send_mailbox(MAILBOX_SM_MOSI3)
         ;
@@ -1909,7 +1914,7 @@ setSmeshTo118:
         ;
         ;if (RCV_State_GearChange = 0xFF) {
         ;    ; Slave accepts mission abort, reset left throttle
-        ;    VCL_Throttle = Throttle_RCV
+        ;    VCL_Throttle = RCV_Throttle
         ;} else {
         ;    ; Serious CAN problems, turn off throttle
         ;    RM_Throttle_Compensated = 0
