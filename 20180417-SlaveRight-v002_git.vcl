@@ -51,6 +51,13 @@ VCL_App_Ver = 011
 ;							CONSTANTS
 ;****************************************************************
 
+; Input Current Limits
+Battery_Current_Limit_Ramp_Rate = 1
+Battery_Current_Limiter_enable = 1
+Battery_Power_Limit = 20                ; per 10W
+;; Regen_Battery_Current_Limit
+;; Motor_Power
+
 RESET_PASSWORD                  constant 141        ; password for "reset_controller_remote" to reset controller
 
 DEBOUNCE_INPUTS					constant    5		; this sets the debounce time for switch inputs to 20ms, 4mS/unit
@@ -72,14 +79,6 @@ NEUTRAL                         constant    0
 DRIVE16                         constant    2
 DRIVE118                        constant    3
 REVERSE                         constant    4
-
-; Current settings
-INITIAL_OUTPUT_DRIVE_CURRENT_LIMIT constant 32767       ; at 0 Battery current, output current limit, 350A /350A*32767
-INITIAL_OUTPUT_REGEN_CURRENT_LIMIT constant 2000        ; at 0 Battery regen current, output current limit,  10A /350A*32767 = 937, minimal 1638
-MAX_DRIVE_INPUT_CURRENT_PER_CTRLR  constant 1404       ; 150A /350A*32767
-MAX_REGEN_INPUT_CURRENT_PER_CTRLR  constant 469        ; 30A /350A*32767
-MARGIN_DRIVE_CURRENT_LIMIT         constant 1300       ; 10A /350A*32767, higher than this input current, the output current will be cutback
-MARGIN_REGEN_CURRENT_LIMIT         constant 350        ; 35A / 350A*32767, higher than this input current, the ouput current will be cutback
 
 
 
@@ -451,51 +450,6 @@ CheckCANMailboxes:
     
     
 faultHandling:
-    
-    if (Battery_Current >= 0) {
-        temp_Calculation = Map_Two_Points(Battery_Current, 0, 12800, 0, 32767)
-        
-        ; Reduce Current at higher battery current
-        if (RCV_Drive_Current_Limit = 0) {
-            ; When limit is not determined by master, calculate own limit
-            temp_Drive_Current_Limit = Map_Two_Points(temp_Calculation, MARGIN_DRIVE_CURRENT_LIMIT, MAX_DRIVE_INPUT_CURRENT_PER_CTRLR, INITIAL_OUTPUT_DRIVE_CURRENT_LIMIT, MAX_DRIVE_INPUT_CURRENT_PER_CTRLR)
-        } else {
-            ; Limit is determined by master
-            temp_Drive_Current_Limit = RCV_Drive_Current_Limit
-        }
-        
-        if (RCV_Regen_Current_Limit = 0) {
-            ; When limit is not determined by master, calculate own limit
-            temp_Regen_Current_Limit = INITIAL_OUTPUT_REGEN_CURRENT_LIMIT
-        } else {
-            ; Limit is determined by master
-            temp_Regen_Current_Limit = RCV_Regen_Current_Limit
-        }
-        
-    } else {
-        temp_Calculation = Map_Two_Points(-Battery_Current, 0, 12800, 0, 32767)
-        
-        ; Reduce Current at higher battery current
-        
-        if (RCV_Drive_Current_Limit = 0) {
-            ; When limit is not determined by master, calculate own limit
-            temp_Drive_Current_Limit = INITIAL_OUTPUT_DRIVE_CURRENT_LIMIT
-        } else {
-            ; Limit is determined by master
-            temp_Drive_Current_Limit = RCV_Drive_Current_Limit
-        }
-        
-        if (RCV_Regen_Current_Limit = 0) {
-            ; When limit is not determined by master, calculate own limit
-            temp_Regen_Current_Limit = Map_Two_Points(temp_Calculation, MARGIN_DRIVE_CURRENT_LIMIT, MAX_REGEN_INPUT_CURRENT_PER_CTRLR, INITIAL_OUTPUT_REGEN_CURRENT_LIMIT, MAX_REGEN_INPUT_CURRENT_PER_CTRLR)
-        } else {
-            ; Limit is determined by master
-            temp_Regen_Current_Limit = RCV_Regen_Current_Limit
-        }
-        
-    }
-    
-    
     
     if (Regen_Fault = ON) {
         

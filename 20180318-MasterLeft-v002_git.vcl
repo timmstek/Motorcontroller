@@ -80,6 +80,12 @@ VCL_App_Ver = 012
 ;							CONSTANTS
 ;****************************************************************
 
+; Input Current Limits
+Battery_Current_Limit_Ramp_Rate = 1
+Battery_Current_Limiter_enable = 1
+Battery_Power_Limit = 20                ; per 10W
+;; Regen_Battery_Current_Limit
+;; Motor_Power
 
 RESET_PASSWORD                  constant    141     ; password for "reset_controller_remote" to reset controller
 
@@ -102,13 +108,6 @@ CONTR_TEMP_FAN_MAX              constant    75
 FANSPEED_IDLE                   constant    10      ; In idle mode, fans will always run at 10%
 
 ; Current settings
-INITIAL_OUTPUT_DRIVE_CURRENT_LIMIT constant 32767       ; at 0 Battery current, output current limit, 350A /350A*32767
-INITIAL_OUTPUT_REGEN_CURRENT_LIMIT constant 2000        ; at 0 Battery regen current, output current limit,  10A /350A*32767 = 937, minimal 1638
-MAX_DRIVE_INPUT_CURRENT_PER_CTRLR  constant 1404       ; 150A /350A*32767
-MAX_REGEN_INPUT_CURRENT_PER_CTRLR  constant 469        ; 30A /350A*32767
-MARGIN_DRIVE_CURRENT_LIMIT         constant 1300       ; 10A /350A*32767, higher than this input current, the output current will be cutback
-MARGIN_REGEN_CURRENT_LIMIT         constant 350        ; 35A / 350A*32767, higher than this input current, the ouput current will be cutback
-
 REDUCED_DRIVE_INPUT_CURLIM_PERC constant    60      ; Drive current limit is 60%, when fault is detected
 REDUCED_REGEN_INPUT_CURLIM_PERC constant    15      ; Regen current limit is 15%, when fault is detected
 REDUCED_THROTTLE_MULTIPLIER     constant    75      ; 60% of 128 = 75
@@ -501,25 +500,19 @@ Throttle_RCV = 0
 
 Mainloop:
     
-    call DNRStatemachine
-    
-    call controlFans
+    call faultHandling
     
     call checkCANMailboxes
     
-    ; All present Errors are Handled appropriate
-    call faultHandling
+    call DNRStatemachine
+    
+    call controlFans
     
     call calculateEfficiency
     
     if (reset_controller_remote = RESET_PASSWORD) {
         Reset_Controller()
     }
-    
-    if ((DLY15_output < 500)&(DLY15_output<>0)) {
-        RCV_DNR_Command = 1
-    }
-    
     
     
     goto mainLoop 
@@ -971,23 +964,6 @@ faultHandling:
     
     call retrieve_Errors
     
-    
-    ;0-12800
-    ; Transform Battery_current to percentage of rated current
-    if (Battery_Current >= 0) {
-        temp_Calculation = Map_Two_Points(Battery_Current, 0, 12800, 0, 32767)
-        
-        ; Reduce Current at higher battery current
-        temp_Drive_Current_Limit = Map_Two_Points(temp_Calculation, MARGIN_DRIVE_CURRENT_LIMIT, MAX_DRIVE_INPUT_CURRENT_PER_CTRLR, INITIAL_OUTPUT_DRIVE_CURRENT_LIMIT, MAX_DRIVE_INPUT_CURRENT_PER_CTRLR)
-        temp_Regen_Current_Limit = INITIAL_OUTPUT_REGEN_CURRENT_LIMIT
-    } else {
-        temp_Calculation = Map_Two_Points(-Battery_Current, 0, 12800, 0, 32767)
-        
-        ; Reduce Current at higher battery current
-        temp_Drive_Current_Limit = INITIAL_OUTPUT_DRIVE_CURRENT_LIMIT
-        temp_Regen_Current_Limit = Map_Two_Points(temp_Calculation, MARGIN_DRIVE_CURRENT_LIMIT, MAX_REGEN_INPUT_CURRENT_PER_CTRLR, INITIAL_OUTPUT_REGEN_CURRENT_LIMIT, MAX_REGEN_INPUT_CURRENT_PER_CTRLR)
-    }
-    
     if ( (Regen_Fault = ON) | (RM_Regen_Fault = ON) ) {
         
         set_ramp_target(FAULT_RAMP, TIME_TO_FULL_LOS_FAULT)          ; Target is 6000ms
@@ -1201,7 +1177,7 @@ controlFans:
     
     
 calculateEfficiency:
-    Power_In = get_muldiv(MTD1, Battery_Current, Capacitor_Voltage, 4096)        ; Battery_Current  ; Capacitor_Voltage 0-200V (0-12800) [W]
+    Power_In = get_muldiv(MTD1, Battery_Current, Capacitor_Voltage, 640)        ; Battery_Current  ; Capacitor_Voltage 0-200V (0-12800) [W]
     
     if (Motor_RPM >= 0) {
         Motor_Rads = Map_Two_Points(Motor_RPM, 0, 12000, 0, 1257)
@@ -1211,7 +1187,6 @@ calculateEfficiency:
     
     Power_Out = Motor_Torque * Motor_Rads               ; Motor_Torque ; Motor_RPM -12000-12000rpm (-12000-12000) [W]
     
-    LM_Efficiency = get_muldiv(MTD1, Power_Out, 255, Power_In)
     AVG_Efficiency = (LM_Efficiency + RCV_RM_Efficiency)/2
     return
     
@@ -1222,40 +1197,19 @@ DNRStatemachine:
     ; STATE MACHINE
     ; 52Hz
     
-    if ((RCV_Key_Switch = 1)) {
+    if ((Key_Switch = 1)) {
         ; Turn car 'on'
-        
-        if ((RCV_Key_Switch != Key_Switch)) {
-            ; Key switch state has changed, so turn on car
+        if ((Interlock_State = OFF)) {
             set_Interlock()
-            state_DNR = PRE_NEUTRAL
-        } else if ((Motor_RPM < IDLE_RPM_THRESHOLD) & (RCV_DNR_Command = 0) & (State_GearChange < 0x60) & (Throttle_RCV < IDLE_THROTTLE_THRESHOLD) ) {
-            ; Car is standing still and there is no change in DNR state
-            
-            if ((Start_Stop_DLY_output = 0) & (Start_Stop_Init_Complete = 0)) {
-                Setup_Delay(Start_Stop_DLY, TIME_TO_START_STOP)
-                Start_Stop_Init_Complete = 1
-            } else if ((Start_Stop_DLY_output = 0) & (Interlock_State = ON)) {
-                ; timer is over, so engage Start Stop
-                clear_Interlock()
-            }
-        } else if (Start_Stop_Init_Complete = 1) {
-            Start_Stop_Init_Complete = 0
-            if ((Interlock_State = OFF)) {
-                set_Interlock()
-            }
-            
         }
+        
         
         Key_Switch = RCV_Key_Switch
         
-    } else if ((RCV_Key_Switch = 0) & (Interlock_State = ON)) {
+    } else {
         ; turn car 'off'
-        clear_Interlock()
-        
-        if (System_Action <> 0) {
-            ; There is some fault, so reset controller at turning off car
-            Reset_Controller()
+        if ((Interlock_State = OFF)) {
+            clear_Interlock()
         }
         
         Key_Switch = RCV_Key_Switch
