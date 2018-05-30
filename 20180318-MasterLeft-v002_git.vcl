@@ -4,8 +4,6 @@
 
 ; GIT: Smesh
 
-testje
-
 ; Author:	Tim Stek
 ; Organization:	TU/ecomotive
 VCL_App_Ver = 012
@@ -93,6 +91,8 @@ VCL_App_Ver = 012
 Battery_Current_Limit_Ramp_Rate = 1
 Battery_Current_Limiter_enable = 1
 Battery_Power_Limit = 20                ; per 10W
+;; Regen_Battery_Current_Limit
+;; Motor_Power
 
 TESTING_DELAY                   constant    0
 
