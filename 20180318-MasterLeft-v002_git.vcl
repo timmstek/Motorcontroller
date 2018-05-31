@@ -55,8 +55,6 @@ VCL_App_Ver = 012
 
 ; TO DO:
 ; Get Batteries working with controller. Then get more info from 1 battery
-;- Send parameters to slave
-;- Test Fans
 ;- Start Stop System
 ;- low prio main loop
 ;- Update current limits with power limits
@@ -106,7 +104,7 @@ CAN_CYCLIC_RATE					constant    25		; this sets the cyclic cycle to every 100 ms
 ; Fan Settings
 FAN_TEMPERATURE_HYSTER          constant    5       ; Temperature should first drop this amount under threshold to turn off fans
 MOTOR_COOLDOWN_THOLD            constant    60      ; from this temperature in C Fans will turn on
-CONTROLLER_COOLDOWN_THOLD       constant    50
+CONTROLLER_COOLDOWN_THOLD       constant    20
 MOTOR_TEMP_FAN_MAX              constant    85      ; At this temperature of motor, fans are spinning at maximum
 CONTR_TEMP_FAN_MAX              constant    75
 FANSPEED_IDLE                   constant    10      ; In idle mode, fans will always run at 10%
@@ -210,8 +208,10 @@ create RM_Motor_Temperature_Display variable
 create Highest_Motor_Temperature variable
 
 create RM_Controller_Temperature_Display variable
-
 create Highest_Controller_Temperature variable
+
+create Controller_Temperature_Display variable
+create Motor_Temperature_Display variable
 
 ;-------------- Batteries ---------------
 
@@ -450,9 +450,9 @@ User_Fault_Action_16 = 1101100000000000b            ; Shutdown motor, shut down 
 ;Free				alias Sw_15					;Pin J1-20
 
 ;--------------- OUTPUTS ----------------
-Fan1IN				alias PWM1					;Pin J1-06
-Fan2OUT				alias PWM2					;Pin J1-05
-;FREE				alias PWM3					;Pin J1-04
+;Main contactor     alias PWM1					;Pin J1-06
+Fan1IN				alias PWM2					;Pin J1-05
+Fan2OUT				alias PWM3					;Pin J1-04
 ;FREE				alias PWM4					;Pin J1-03
 ;Free				alias PWM5					;Pin J1-02
 
@@ -1228,8 +1228,10 @@ setup_2D_MAP:
     
 controlFans:
     
-    if (Motor_Temperature > RM_Motor_Temperature_Display) {
-        Temp_Motor_Display = Map_Two_Points(Motor_Temperature, 0, 2550, 0, 255)
+    Motor_Temperature_Display = Map_Two_Points(Motor_Temperature, 0, 2550, 0, 255)
+    
+    if (Motor_Temperature_Display > RM_Motor_Temperature_Display) {
+        Temp_Motor_Display = Motor_Temperature_Display
         Temp_Index_M = ON
     } else {
         Temp_Motor_Display = RM_Motor_Temperature_Display
@@ -1240,7 +1242,7 @@ controlFans:
     if (Temp_Motor_Display > MOTOR_COOLDOWN_THOLD) {
         ; When motor is too hot (above threshold), turn on fans, make them spin faster when temperature rises
         
-        MOTOR_FAN_PERCENTAGE = Map_Two_Points(Temp_Motor_Display, MOTOR_COOLDOWN_THOLD, 10, MOTOR_TEMP_FAN_MAX, 100)
+        MOTOR_FAN_PERCENTAGE = Map_Two_Points(Temp_Motor_Display, MOTOR_COOLDOWN_THOLD, MOTOR_TEMP_FAN_MAX, 10, 100)
     } else if (Temp_Motor_Display < MOTOR_COOLDOWN_THOLD - FAN_TEMPERATURE_HYSTER) {
         ; When motor temperature is below hysteresis, set fan to 0%
         
@@ -1249,9 +1251,10 @@ controlFans:
     
     
     
+    Controller_Temperature_Display = Map_Two_Points(Controller_Temperature, 0, 2550, 0, 255)
     
-    if (Controller_Temperature > RM_Controller_Temperature_Display) {
-        Temp_Contr_Display = Map_Two_Points(Controller_Temperature, 0, 2550, 0, 255)
+    if (Controller_Temperature_Display > RM_Controller_Temperature_Display) {
+        Temp_Contr_Display = Controller_Temperature_Display
         Temp_Index_C = ON
     } else {
         Temp_Contr_Display = RM_Controller_Temperature_Display
@@ -1262,7 +1265,7 @@ controlFans:
     if (Temp_Contr_Display > CONTROLLER_COOLDOWN_THOLD) {
         ; When controller is too hot (above threshold), turn on fans, make them spin faster when temperature rises
         
-        CONTROLLER_FAN_PERCENTAGE = Map_Two_Points(Temp_Contr_Display, CONTROLLER_COOLDOWN_THOLD, 10, CONTR_TEMP_FAN_MAX, 100)
+        CONTROLLER_FAN_PERCENTAGE = Map_Two_Points(Temp_Contr_Display, CONTROLLER_COOLDOWN_THOLD, CONTR_TEMP_FAN_MAX, 10, 100)
     } else if (Temp_Contr_Display < CONTROLLER_COOLDOWN_THOLD - FAN_TEMPERATURE_HYSTER) {
         ; When controller temperature is below hysteresis, set fan to 0%
         
