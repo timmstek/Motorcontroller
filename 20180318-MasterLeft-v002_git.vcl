@@ -55,7 +55,7 @@ VCL_App_Ver = 012
 
 ; TO DO:
 ; Get Batteries working with controller. Then get more info from 1 battery
-;- low prio main loop
+;- low prio main loop           <- causes deadlock
 ;- Update current limits with power limits
 
 ; TEST:
@@ -571,14 +571,14 @@ Mainloop:
     
     call DNRStatemachine
     
-    if (Low_Prio_Loop_DLY_output = 0) {
+    ;if (Low_Prio_Loop_DLY_output = 0) {
         
         call controlFans
     
         call calculateEfficiency
         
-        setup_delay(Low_Prio_Loop_DLY, LOW_PRIO_LOOP_RATE)
-    }
+    ;    setup_delay(Low_Prio_Loop_DLY, LOW_PRIO_LOOP_RATE)
+    ;}
     
     
     goto mainLoop 
