@@ -55,7 +55,6 @@ VCL_App_Ver = 012
 
 ; TO DO:
 ; Get Batteries working with controller. Then get more info from 1 battery
-;- Start Stop System
 ;- low prio main loop
 ;- Update current limits with power limits
 
@@ -94,6 +93,8 @@ RESET_PASSWORD                  constant    141     ; password for "reset_contro
 STARTUP_DELAY					constant    3000    ; time before startup system [ms]
 
 DEBOUNCE_INPUTS					constant    5		; this sets the debounce time for switch inputs to 20ms, 4mS/unit
+
+LOW_PRIO_LOOP_RATE              constant    100     ; 
 
 ; CAN Settings
 CAN_DELAY_FOR_ACK               constant    500     ; in ms
@@ -483,6 +484,8 @@ Low_Priority_Mailbox_DLY          alias     DLY5
 Low_Priority_Mailbox_DLY_output   alias     DLY5_output
 Start_Stop_DLY                    alias     DLY6
 Start_Stop_DLY_output             alias     DLY6_output
+Low_Prio_Loop_DLY                 alias     DLY7
+Low_Prio_Loop_DLY_output          alias     DLY7_output
 
 FAULT_TIMER                       alias      TMR1
 FAULT_TIMER_ms_output             alias      TMR1_ms_output
@@ -568,9 +571,14 @@ Mainloop:
     
     call DNRStatemachine
     
-    call controlFans
+    if (Low_Prio_Loop_DLY_output = 0) {
+        
+        call controlFans
     
-    call calculateEfficiency
+        call calculateEfficiency
+        
+        setup_delay(Low_Prio_Loop_DLY, LOW_PRIO_LOOP_RATE)
+    }
     
     
     goto mainLoop 
