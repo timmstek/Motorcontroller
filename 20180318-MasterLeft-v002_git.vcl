@@ -2,7 +2,7 @@
 ;					Controller Master - Master motor controller (Left)
 ;===============================================================================================
 
-; GIT: Smesh
+; GIT: Master
 
 ; Author:	Tim Stek
 ; Organization:	TU/ecomotive
