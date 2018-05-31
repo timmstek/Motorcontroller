@@ -167,9 +167,6 @@ BRAKE                           constant    8
 
 create reset_controller_remote variable
 
-;create  RCV_RM_Battery_Current        variable            ; DC battery current, received from Right Motorcontroller
-create  RCV_RM_Motor_Temperature_Display    variable    ; Motor temperature 0-255°C, received from Right Motorcontroller
-create  RCV_RM_Controller_Temperature_Display    variable   ; Controller temperature  0-255°C, received from Right Motorcontroller
 create  RCV_State_GearChange        variable            ; Smesh enabled, received from Right Motorcontroller
 
 create RCV_System_Action variable
@@ -202,10 +199,12 @@ create MOTOR_FAN_PERCENTAGE variable
 create CONTROLLER_FAN_PERCENTAGE variable
 create HIGHEST_FAN_PERCENTAGE variable
 
-create RM_Motor_Temperature variable
+
+create RM_Motor_Temperature_Display variable
 create Highest_Motor_Temperature variable
 
-create RM_Controller_Temperature variable
+create RM_Controller_Temperature_Display variable
+
 create Highest_Controller_Temperature variable
 
 ;-------------- Batteries ---------------
@@ -254,7 +253,7 @@ create Batt_ErrorMSG4 variable                      ; Battery fault bits #4
 
 
 ; Efficiency calculation
-Efficiency                        alias      user10     ; Average Efficiency of left and right controller
+LM_Efficiency                     alias      user11     ; Left controller Efficiency
 Power_In                          alias      user13     ; Input Power
 Power_Out                         alias      user14     ; Ouput Power
 Motor_Rads                        alias      user15     ; Rotor speed [rad/s]
@@ -565,12 +564,12 @@ startupCANSystem:
 
     Setup_Mailbox_Data(MAILBOX_SM_MISO1, 7,			
         @RCV_System_Action,				
-        @RCV_System_Action + USEHB, 
-        @RCV_RM_Efficiency,				        ; Motor Efficiency, 
-        @RCV_RM_Motor_Temperature_Display,			; Motor temperature 0-255°C
-        @RCV_RM_Controller_Temperature_Display,     ; Controller temperature  0-255°C
+        @RCV_System_Action + USEHB,
+        @RM_Motor_Temperature_Display,			; Motor temperature 0-255°C
+        @RM_Controller_Temperature_Display,     ; Controller temperature  0-255°C
         @RCV_State_GearChange,				    ; Smesh enabled
         @RM_Fault_System,
+        0,
         0)
         
         
@@ -678,8 +677,8 @@ startupCANSystem:
         @Temp_Contr_Display,		; Temperature of Controllers
         @state_DNR,			    ; Temperature errors from Batteries
         @Temp_Index_Display,		; Index which motor, controller and battery is the hottest (M-C)
-        @AVG_Efficiency,            ; Regen, Eco or power region
-		@State_Of_Charge,
+        @LM_Efficiency,            ; Regen, Eco or power region
+		    @State_Of_Charge,
         0)
 
 
@@ -1111,13 +1110,11 @@ setup_2D_MAP:
     
 controlFans:
     
-    RM_Motor_Temperature = RCV_RM_Motor_Temperature_Display*10
-    
-    if (Motor_Temperature > RM_Motor_Temperature) {
-        Temp_Motor_Display = Motor_Temperature/10
+    if (Motor_Temperature > RM_Motor_Temperature_Display) {
+        Temp_Motor_Display = Map_Two_Points(Motor_Temperature, 0, 2550, 0, 255)
         Temp_Index_M = ON
     } else {
-        Temp_Motor_Display = RM_Motor_Temperature/10
+        Temp_Motor_Display = RM_Motor_Temperature_Display
         Temp_Index_M = OFF
     }
     
@@ -1135,13 +1132,11 @@ controlFans:
     
     
     
-    RM_Controller_Temperature = RCV_RM_Controller_Temperature_Display*10
-    
-    if (Controller_Temperature > RM_Controller_Temperature) {
-        Temp_Contr_Display = Controller_Temperature/10
+    if (Controller_Temperature > RM_Controller_Temperature_Display) {
+        Temp_Contr_Display = Map_Two_Points(Controller_Temperature, 0, 2550, 0, 255)
         Temp_Index_C = ON
     } else {
-        Temp_Contr_Display = RM_Controller_Temperature/10
+        Temp_Contr_Display = RM_Controller_Temperature_Display
         Temp_Index_C = OFF
     }
     
@@ -1191,8 +1186,7 @@ calculateEfficiency:
     }
     
     Power_Out = Motor_Torque * Motor_Rads               ; Motor_Torque ; Motor_RPM -12000-12000rpm (-12000-12000) [W]
-    
-    Efficiency = LM_Efficiency
+
     return
     
 
@@ -1641,8 +1635,7 @@ setSmeshTo16:
         
         State_GearChange = 0x6A
         send_mailbox(MAILBOX_SM_MOSI3)
-    
-    
+
     ;;;;; 11. reduce left throttle to normal
 
         VCL_Throttle = Map_Two_Points(RCV_Throttle, 0, 255, 0, 32767)

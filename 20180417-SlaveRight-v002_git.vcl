@@ -438,10 +438,8 @@ startup_CAN_System:
 
 
 CheckCANMailboxes:
-    
-    
-    
-    
+
+    call calculateTemperature
 
     return
     
