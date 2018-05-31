@@ -104,7 +104,7 @@ CAN_CYCLIC_RATE					constant    25		; this sets the cyclic cycle to every 100 ms
 ; Fan Settings
 FAN_TEMPERATURE_HYSTER          constant    5       ; Temperature should first drop this amount under threshold to turn off fans
 MOTOR_COOLDOWN_THOLD            constant    60      ; from this temperature in C Fans will turn on
-CONTROLLER_COOLDOWN_THOLD       constant    20
+CONTROLLER_COOLDOWN_THOLD       constant    50
 MOTOR_TEMP_FAN_MAX              constant    85      ; At this temperature of motor, fans are spinning at maximum
 CONTR_TEMP_FAN_MAX              constant    75
 FANSPEED_IDLE                   constant    10      ; In idle mode, fans will always run at 10%
@@ -163,7 +163,7 @@ BRAKE                           constant    8
 
 ; Accesible from programmer handheld (max. 100 user, 10 bit)
 
-;PAR_Total_Maint_interval		alias P_User1		;Can be saved to non-volatile memory
+Key_Switch_Hard_Reset_Complete		alias P_User1		;Can be saved to non-volatile memory
 
 ;Auto user variables (max. 300 user, 16 bit)
 
@@ -212,6 +212,11 @@ create Highest_Controller_Temperature variable
 
 create Controller_Temperature_Display variable
 create Motor_Temperature_Display variable
+
+;-------------- Start Stop ---------------
+
+create Start_Stop_Init variable
+create Start_Stop_Active variable
 
 ;-------------- Batteries ---------------
 
@@ -553,6 +558,10 @@ RCV_DNR_Command = 0
 
 Mainloop:
     
+    if (reset_controller_remote = RESET_PASSWORD) {
+        Reset_Controller()
+    }
+    
     call faultHandling
     
     call checkCANMailboxes
@@ -562,10 +571,6 @@ Mainloop:
     call controlFans
     
     call calculateEfficiency
-    
-    if (reset_controller_remote = RESET_PASSWORD) {
-        Reset_Controller()
-    }
     
     
     goto mainLoop 
@@ -668,13 +673,13 @@ startupCANSystem:
             
     Setup_Mailbox(MAILBOX_SM_MOSI3, 0, 0, MAILBOX_SM_MOSI3_addr, C_EVENT, C_XMT, 0, 0)
 
-    Setup_Mailbox_Data(MAILBOX_SM_MOSI3, 5, 		
+    Setup_Mailbox_Data(MAILBOX_SM_MOSI3, 6, 		
         @RM_Throttle_Compensated,			
         @RM_Throttle_Compensated + USEHB,
         @RM_Drive_Current_Limit,
         @RM_Drive_Current_Limit + USEHB,
         @State_GearChange,				
-        0, 
+        @reset_controller_remote, 
         0,
 		0)
             
@@ -1321,20 +1326,61 @@ DNRStatemachine:
     
     if ((Key_Switch = 1)) {
         ; Turn car 'on'
-        if ((Interlock_State = OFF)) {
-            set_Interlock()
+        
+        if ((RCV_Key_Switch = 0)) {
+            ; Key switch state has changed, so turn off car
+            clear_Interlock()
+            
+            Key_Switch = RCV_Key_Switch
+            Start_Stop_Init = 0
+            Start_Stop_Active = 0
+        } else if ((Motor_RPM < IDLE_RPM_THRESHOLD) & (RCV_DNR_Command = 0) & (State_GearChange < 0x60) & (RCV_Throttle < IDLE_THROTTLE_THRESHOLD) ) {
+            ; Car is standing still and there is no change in DNR state
+            
+            if ((Start_Stop_Init = 0)) {
+                Setup_Delay(Start_Stop_DLY, TIME_TO_START_STOP)
+                Start_Stop_Init = 1
+            } else if ((Start_Stop_DLY_output = 0) & (Start_Stop_Active <> 1) ) {
+                ; timer is over, so engage Start Stop
+                clear_Interlock()
+                Start_Stop_Active = 1
+            }
+        } else {
+            Start_Stop_Init = 0
+            Start_Stop_Active = 0
+            if ((Interlock_State = OFF)) {
+                set_Interlock()
+            }
+            
+        }
+        
+        if ((Key_Switch_Hard_Reset_Complete <> 0)) {
+            Key_Switch_Hard_Reset_Complete = 0
         }
         
         
-        Key_Switch = RCV_Key_Switch
         
     } else {
-        ; turn car 'off'
-        if ((Interlock_State = OFF)) {
+        
+        if ((RCV_Key_Switch = 1)) {
+            ; Key switch state has changed, so turn on car
+            set_Interlock()
+            state_DNR = PRE_NEUTRAL
+            
+            Key_Switch = RCV_Key_Switch
+        } else if ((Interlock_State = ON)) {
+            ; When interlock is unexpected turned ON, turn car 'off'
             clear_Interlock()
         }
         
-        Key_Switch = RCV_Key_Switch
+        
+        if ((System_Action <> 0) & (Key_Switch_Hard_Reset_Complete = 0)) {
+            ; There is some fault, so reset controller at turning off car
+            Key_Switch_Hard_Reset_Complete = 1
+            reset_controller_remote = RESET_PASSWORD
+            
+            send_mailbox(MAILBOX_SM_MOSI3)
+        }
     }
     
     if (Brake_RCV = 1) {
@@ -1347,10 +1393,7 @@ DNRStatemachine:
     
     
     
-    ;Put_Spy_Message("LOOP",1,"AG",PSM_TEXT_ONLY)
     
-    ;Setup_Delay(DLY16, 500)
-    ;while (DLY16_output <> 0) {}			; Wait 500ms before start
     
     if ( (State_GearChange >= 0x60) & (State_GearChange < 0x6D) ) {
         
