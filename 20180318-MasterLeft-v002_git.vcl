@@ -2,7 +2,7 @@
 ;					Controller Master - Master motor controller (Left)
 ;===============================================================================================
 
-; GIT: Smesh
+; GIT: MASTER
 
 ; Author:	Tim Stek
 ; Organization:	TU/ecomotive
@@ -199,10 +199,12 @@ create MOTOR_FAN_PERCENTAGE variable
 create CONTROLLER_FAN_PERCENTAGE variable
 create HIGHEST_FAN_PERCENTAGE variable
 
+
 create RM_Motor_Temperature_Display variable
 create Highest_Motor_Temperature variable
 
 create RM_Controller_Temperature_Display variable
+
 create Highest_Controller_Temperature variable
 
 ;-------------- Batteries ---------------
@@ -676,7 +678,7 @@ startupCANSystem:
         @state_DNR,			    ; Temperature errors from Batteries
         @Temp_Index_Display,		; Index which motor, controller and battery is the hottest (M-C)
         @LM_Efficiency,            ; Regen, Eco or power region
-		@State_Of_Charge,
+		    @State_Of_Charge,
         0)
 
 
@@ -1108,7 +1110,6 @@ setup_2D_MAP:
     
 controlFans:
     
-    
     if (Motor_Temperature > RM_Motor_Temperature_Display) {
         Temp_Motor_Display = Map_Two_Points(Motor_Temperature, 0, 2550, 0, 255)
         Temp_Index_M = ON
@@ -1185,9 +1186,13 @@ calculateEfficiency:
     }
     
     Power_Out = Motor_Torque * Motor_Rads               ; Motor_Torque ; Motor_RPM -12000-12000rpm (-12000-12000) [W]
+<<<<<<< HEAD
     
     LM_Efficiency = get_muldiv(MTD2, Power_Out, 255, Power_In)
     
+=======
+
+>>>>>>> a1ecec6e166371237e888a2458ef00a53567c53b
     return
     
 
@@ -1494,8 +1499,8 @@ DNRStatemachine:
     }
     
     VCL_Throttle = get_muldiv(MTD1, temp_VCL_Throttle, L_Steering_Multiplier, 255)
-    temp_Calculation = get_muldiv(MTD1, temp_VCL_Throttle, R_Steering_Multiplier, 255)
-    RM_Throttle_Compensated = get_muldiv(MTD1, temp_Calculation, Throttle_Multiplier, 128)
+    temp_Calculation = get_muldiv(MTD2, temp_VCL_Throttle, R_Steering_Multiplier, 255)
+    RM_Throttle_Compensated = get_muldiv(MTD3, temp_Calculation, Throttle_Multiplier, 128)
     
     
     ; Set right DNR equal to left DNR
@@ -1632,10 +1637,17 @@ setSmeshTo16:
         ; 16 OFF(clear); 118 ON(set)
         clear_DigOut(SmeshRightPin)                          ; Change gear
         
+<<<<<<< HEAD
         State_GearChange = 0x69
     
     
     ;;;;; 10. Reduce left throttle to normal
+=======
+        State_GearChange = 0x6A
+        send_mailbox(MAILBOX_SM_MOSI3)
+
+    ;;;;; 11. reduce left throttle to normal
+>>>>>>> a1ecec6e166371237e888a2458ef00a53567c53b
 
         VCL_Throttle = Map_Two_Points(RCV_Throttle, 0, 255, 0, 32767)
         Drive_Current_Limit = temp_Drive_Current_Limit
