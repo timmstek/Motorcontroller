@@ -146,22 +146,42 @@ Brake_RCV                               alias       user43          ; Received b
 
 ;------------- CAN MAILBOXES --------------
 MAILBOX_SM_MISO1						alias CAN1
+MAILBOX_SM_MISO1_addr                   constant 0x111
+
 MAILBOX_SM_MOSI1						alias CAN2
 MAILBOX_SM_MOSI1_received               alias CAN2_received
+MAILBOX_SM_MOSI1_addr                   constant 0x101
+
 MAILBOX_SM_MOSI2						alias CAN3
 MAILBOX_SM_MOSI2_received               alias CAN3_received
+MAILBOX_SM_MOSI2_addr                   constant 0x102
+
 MAILBOX_SM_MOSI3						alias CAN4
 MAILBOX_SM_MOSI3_received               alias CAN4_received
+MAILBOX_SM_MOSI3_addr                   constant 0x100
+
 MAILBOX_SM_MISO2						alias CAN5
+MAILBOX_SM_MISO2_addr                   constant 0x110
+
 
 MAILBOX_ERROR_MESSAGES                  alias CAN19
+MAILBOX_ERROR_MESSAGES_addr             constant 0x001
+
 MAILBOX_ERROR_MESSAGES_RCV_ACK          alias CAN20
 MAILBOX_ERROR_MESSAGES_RCV_ACK_received alias CAN20_output
+MAILBOX_ERROR_MESSAGES_RCV_ACK_addr     constant 0x002
+
 MAILBOX_MISO_REQUEST_PARAM              alias CAN21
+MAILBOX_MISO_REQUEST_PARAM_addr         constant 0x112
+
 MAILBOX_MOSI_INIT_PARAM1                alias CAN22
 MAILBOX_MOSI_INIT_PARAM1_received       alias CAN22_received
+MAILBOX_MOSI_INIT_PARAM1_addr           constant 0x103
+
 MAILBOX_MOSI_INIT_PARAM2                alias CAN23
 MAILBOX_MOSI_INIT_PARAM2_received       alias CAN23_received
+MAILBOX_MOSI_INIT_PARAM2_addr           constant 0x104
+
 
 
 ;----------- User Defined Faults ------------
@@ -322,7 +342,7 @@ startup_CAN_System:
    			; Type:			PDO1 MISO1
    			; Partner:		Master Motorcontroller
 
-    Setup_Mailbox(MAILBOX_SM_MISO1, 0, 0, 0x111, C_CYCLIC, C_XMT, 0, 0)
+    Setup_Mailbox(MAILBOX_SM_MISO1, 0, 0, MAILBOX_SM_MISO1_addr, C_CYCLIC, C_XMT, 0, 0)
 
     Setup_Mailbox_Data(MAILBOX_SM_MISO1, 6,			
         @System_Action,				        ; DC battery current , calculated not measured
@@ -341,7 +361,7 @@ startup_CAN_System:
    			; Type:			PDO2 MOSI1
    			; Partner:		Slave Motorcontroller
         
-    Setup_Mailbox(MAILBOX_SM_MOSI1, 0, 0, 0x101, C_EVENT, C_RCV, 0, 0)
+    Setup_Mailbox(MAILBOX_SM_MOSI1, 0, 0, MAILBOX_SM_MOSI1_addr, C_EVENT, C_RCV, 0, 0)
     
     Setup_Mailbox_Data(MAILBOX_SM_MOSI1, 8,
         @RCV_Throttle_Compensated,			    ; Torque for right motorcontroller
@@ -359,7 +379,7 @@ startup_CAN_System:
    			; Type:			PDO1 MOSI2
    			; Partner:		Slave Motorcontroller
 
-    Setup_Mailbox(MAILBOX_SM_MOSI2, 0, 0, 0x102, C_EVENT, C_RCV, 0, 0)
+    Setup_Mailbox(MAILBOX_SM_MOSI2, 0, 0, MAILBOX_SM_MOSI2_addr, C_EVENT, C_RCV, 0, 0)
 
     Setup_Mailbox_Data(MAILBOX_SM_MOSI2, 2,
         @Brake_RCV,
@@ -377,7 +397,7 @@ startup_CAN_System:
    			; Type:			PDO MOSI3
    			; Partner:		Slave Motorcontroller
             
-    Setup_Mailbox(MAILBOX_SM_MOSI3, 0, 0, 0x100, C_EVENT, C_RCV, 0, 0)
+    Setup_Mailbox(MAILBOX_SM_MOSI3, 0, 0, MAILBOX_SM_MOSI3_addr, C_EVENT, C_RCV, 0, 0)
 
     Setup_Mailbox_Data(MAILBOX_SM_MOSI3, 5, 		
         @RCV_Throttle_Compensated,			
@@ -395,7 +415,7 @@ startup_CAN_System:
    			; Type:			PDO MISO3
    			; Partner:		Slave Motorcontroller
          
-    Setup_Mailbox(MAILBOX_SM_MISO2, 0, 0, 0x110, C_EVENT, C_XMT, 0, 0)
+    Setup_Mailbox(MAILBOX_SM_MISO2, 0, 0, MAILBOX_SM_MISO2_addr, C_EVENT, C_XMT, 0, 0)
 
     Setup_Mailbox_Data(MAILBOX_SM_MISO2, 1, 		
         @State_GearChange,			; Motor torque
@@ -413,7 +433,7 @@ startup_CAN_System:
    			; Type:			PDO6
    			; Partner:		Master controller
 
-    Setup_Mailbox(MAILBOX_ERROR_MESSAGES, 0, 0, 0x001, C_EVENT, C_XMT, 0, 0)
+    Setup_Mailbox(MAILBOX_ERROR_MESSAGES, 0, 0, MAILBOX_ERROR_MESSAGES_addr, C_EVENT, C_XMT, 0, 0)
     Setup_Mailbox_Data(MAILBOX_ERROR_MESSAGES, 3, 		
         @Fault_System,
         @System_Action,				; DC battery current , calculated not measured
@@ -430,7 +450,7 @@ startup_CAN_System:
    			; Type:			PDO6
    			; Partner:		Master controller
 
-    Setup_Mailbox(MAILBOX_ERROR_MESSAGES_RCV_ACK, 0, 0, 0x002, C_EVENT, C_RCV, 0, 0)
+    Setup_Mailbox(MAILBOX_ERROR_MESSAGES_RCV_ACK, 0, 0, MAILBOX_ERROR_MESSAGES_RCV_ACK_addr, C_EVENT, C_RCV, 0, 0)
     Setup_Mailbox_Data(MAILBOX_ERROR_MESSAGES_RCV_ACK, 3, 		
         @RCV_ACK_Fault_System,
         @RCV_ACK_System_Action,				; DC battery current , calculated not measured
@@ -447,7 +467,7 @@ startup_CAN_System:
    			; Type:			MISO
    			; Partner:		Master controller
 
-    Setup_Mailbox(MAILBOX_MISO_REQUEST_PARAM, 0, 0, 0x112, C_EVENT, C_XMT, 0, 0)
+    Setup_Mailbox(MAILBOX_MISO_REQUEST_PARAM, 0, 0, MAILBOX_MISO_REQUEST_PARAM_addr, C_EVENT, C_XMT, 0, 0)
     Setup_Mailbox_Data(MAILBOX_MISO_REQUEST_PARAM, 1, 		
         @Request_Slave_Param,
         0,
@@ -463,7 +483,7 @@ startup_CAN_System:
    			; Type:			MOSI
    			; Partner:		Master controller
 
-    Setup_Mailbox(MAILBOX_MOSI_INIT_PARAM1, 0, 0, 0x103, C_EVENT, C_RCV, 0, 0)
+    Setup_Mailbox(MAILBOX_MOSI_INIT_PARAM1, 0, 0, MAILBOX_MOSI_INIT_PARAM1_addr, C_EVENT, C_RCV, 0, 0)
     Setup_Mailbox_Data(MAILBOX_MOSI_INIT_PARAM1, 8, 		
         @Max_Speed_TrqM,
         @Max_Speed_TrqM + USEHB,				
@@ -479,7 +499,7 @@ startup_CAN_System:
    			; Type:			MOSI
    			; Partner:		Master controller
 
-    Setup_Mailbox(MAILBOX_MOSI_INIT_PARAM2, 0, 0, 0x104, C_EVENT, C_RCV, 0, 0)
+    Setup_Mailbox(MAILBOX_MOSI_INIT_PARAM2, 0, 0, MAILBOX_MOSI_INIT_PARAM2_addr, C_EVENT, C_RCV, 0, 0)
     Setup_Mailbox_Data(MAILBOX_MOSI_INIT_PARAM2, 4, 		
         @Brake_Release_Rate_TrqM,
         @Brake_Release_Rate_TrqM + USEHB,				
