@@ -291,16 +291,15 @@ call startup_CAN_System 		;setup and start the CAN communications system
 
 Mainloop:
     
+    if (reset_controller_remote = RESET_PASSWORD) {
+        Reset_Controller()
+    }
+    
     call CheckCANMailboxes
     
     call DNR_statemachine
     
     call faultHandling
-
-    
-    if (reset_controller_remote = RESET_PASSWORD) {
-        Reset_Controller()
-    }
     
     
     goto Mainloop 
@@ -399,13 +398,13 @@ startup_CAN_System:
             
     Setup_Mailbox(MAILBOX_SM_MOSI3, 0, 0, MAILBOX_SM_MOSI3_addr, C_EVENT, C_RCV, 0, 0)
 
-    Setup_Mailbox_Data(MAILBOX_SM_MOSI3, 5, 		
+    Setup_Mailbox_Data(MAILBOX_SM_MOSI3, 6, 		
         @RCV_Throttle_Compensated,			
         @RCV_Throttle_Compensated + USEHB,
         @Drive_Current_Limit,
         @Drive_Current_Limit + USEHB,
         @RCV_State_GearChange,							
-        0,
+        @reset_controller_remote,
 		0,
 		0)
         
