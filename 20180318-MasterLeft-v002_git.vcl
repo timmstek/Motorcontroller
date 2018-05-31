@@ -1186,13 +1186,9 @@ calculateEfficiency:
     }
     
     Power_Out = Motor_Torque * Motor_Rads               ; Motor_Torque ; Motor_RPM -12000-12000rpm (-12000-12000) [W]
-<<<<<<< HEAD
     
     LM_Efficiency = get_muldiv(MTD2, Power_Out, 255, Power_In)
-    
-=======
 
->>>>>>> a1ecec6e166371237e888a2458ef00a53567c53b
     return
     
 
@@ -1637,17 +1633,10 @@ setSmeshTo16:
         ; 16 OFF(clear); 118 ON(set)
         clear_DigOut(SmeshRightPin)                          ; Change gear
         
-<<<<<<< HEAD
         State_GearChange = 0x69
     
     
     ;;;;; 10. Reduce left throttle to normal
-=======
-        State_GearChange = 0x6A
-        send_mailbox(MAILBOX_SM_MOSI3)
-
-    ;;;;; 11. reduce left throttle to normal
->>>>>>> a1ecec6e166371237e888a2458ef00a53567c53b
 
         VCL_Throttle = Map_Two_Points(RCV_Throttle, 0, 255, 0, 32767)
         Drive_Current_Limit = temp_Drive_Current_Limit
