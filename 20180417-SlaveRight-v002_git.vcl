@@ -2,7 +2,7 @@
 ;					Controller Slave - Slave motor controller (Right)
 ;===============================================================================================
 
-; GIT: MASTER
+; GIT: Smesh
 
 ; Author:	Tim Stek
 ; Organization:	TU/ecomotive
@@ -69,7 +69,7 @@ CAN_CYCLIC_RATE					constant    25	    ; this sets the cyclic cycle to every 100
 ; Timers
 MAX_TIME_GEARCHANGE			    constant    1500    ; Maximum time gear change may take [ms]
 STARTUP_DELAY                   constant    3000    ; Delay before system starts up [ms]
-SMESH_FININSHED_DELAY           constant    10      ;
+SMESH_FININSHED_DELAY           constant    100      ;
 
 ; DNR, Throttle and Brake
 FULL_BRAKE                      constant    32767   ; On a scale of 0-32767, how hard controller will brake
@@ -209,10 +209,13 @@ Startup_DLY                       alias		DLY1
 Startup_DLY_output                alias		DLY1_output
 Smesh_DLY                         alias     DLY2
 Smesh_DLY_output                  alias     DLY2_output
-EMERGENCY_ACK_DLY                 alias     DLY3
-EMERGENCY_ACK_DLY_output          alias     DLY3_output
-General_DLY                       alias     DLY4
-General_DLY_output                alias     DLY4_output
+Smesh_Finished_DLY                alias     DLY3
+Smesh_Finished_DLY_output         alias     DLY3_output
+EMERGENCY_ACK_DLY                 alias     DLY4
+EMERGENCY_ACK_DLY_output          alias     DLY4_output
+General_DLY                       alias     DLY5
+General_DLY_output                alias     DLY5_output
+
 
 
 
@@ -611,7 +614,7 @@ setSmeshTo16:
     
     ;;;;; 1. Reduce Left throttle
     
-    if ( (RCV_State_GearChange = 0x60) | (RCV_State_GearChange = 0x61) ) {
+    if ( (RCV_State_GearChange = 0x61) & (State_GearChange <> 0x62) ) {
         setup_delay(Smesh_DLY, MAX_TIME_GEARCHANGE)
         State_GearChange = 0x62
         
@@ -622,7 +625,7 @@ setSmeshTo16:
     ;;;;; 2. Receive ACK: Procedure has started
     ;;;;; 3. multiply throttle of Right controller with 2
     
-    if (RCV_State_GearChange = 0x63) {
+    if ( (RCV_State_GearChange = 0x63) & (State_GearChange <> 0x64) ) {
         VCL_Throttle = RCV_Throttle_Compensated
         State_GearChange = 0x64
         
@@ -632,15 +635,9 @@ setSmeshTo16:
     
     ;;;;; 4. receive ACK from controller: throttle is increased
     ;;;;; 5. Switch left gear to 1:6
-    
-    if ( (RCV_State_GearChange = 0x64) | (RCV_State_GearChange = 0x65) ) {
-        State_GearChange = 0x65
-    }
-	
-    
     ;;;;; 6. Reduce throttle right controller
     
-    if (RCV_State_GearChange = 0x66) {
+    if ( (RCV_State_GearChange = 0x66) & (State_GearChange <> 0x67) ) {
         VCL_Throttle = RCV_Throttle_Compensated
         State_GearChange = 0x67
         
@@ -650,49 +647,27 @@ setSmeshTo16:
     
     ;;;;; 7. receive ACK from controller: throttle is reduced
     ;;;;; 8. Increase left throttle
+    ;;;;; 9. Change right gear to 1:6
+    ;;;;; 10. Reduce left throttle to normal
+    ;;;;; 11. Increase throttle right controller to normal
+    ;;;;; 12. Receive ACK: Procedure has finished
     
-    if (RCV_State_GearChange = 0x67) {
-        State_GearChange = 0x67
-    }
-    
-    
-    ;;;;; 10. receive ACK from controller: procedure has started
-    
-    if (RCV_State_GearChange = 0x68) {
-        State_GearChange = 0x68
-    }
-    
-    
-    ;;;;; 11. reduce left throttle to normal
-    
-    if ( (RCV_State_GearChange = 0x6A) | (RCV_State_GearChange = 0x6B) ) {
-        State_GearChange = 0x6B
-    }
-
-    
-    ;;;;; 12. increase throttle right controller to normal
-    
-    if ( (RCV_State_GearChange = 0x6C) | (RCV_State_GearChange = 0x6D) ) {
+    if ( (RCV_State_GearChange = 0x6B) ) {
         VCL_Throttle = RCV_Throttle_Compensated
         State_GearChange = 0x6C
         
         send_mailbox(MAILBOX_SM_MISO2)
         
+        setup_delay(Smesh_Finished_DLY, SMESH_FININSHED_DELAY)
+        while (Smesh_Finished_DLY_output <> 0) {}
         
     ;;;;; 13. Change is successful, thus speed_to_RPM can be changed
         
         Speed_to_RPM = 601          ; (G/d)*5305 ... 6/530*5305 ... One decimal
         
         ; Gear state to complete
+        
         State_GearChange = 0x6D
-        
-        send_mailbox(MAILBOX_SM_MISO2)
-        
-        
-        Setup_Delay(DLY16, 8)
-        while (DLY16_output <> 0) {}			; Wait 500ms before start
-        
-        test = 4
     }
     
     
@@ -716,7 +691,7 @@ setSmeshTo118:
 
     ;;;;; 1. Reduce Left throttle
     
-    if ( (RCV_State_GearChange = 0x81) ) {
+    if ( (RCV_State_GearChange = 0x81) & (State_GearChange <> 0x82) ) {
         setup_delay(Smesh_DLY, MAX_TIME_GEARCHANGE)
         State_GearChange = 0x82
         
@@ -727,7 +702,7 @@ setSmeshTo118:
     ;;;;; 2. Receive ACK: Procedure has started
     ;;;;; 3. multiply throttle of Right controller with 2
     
-    if (RCV_State_GearChange = 0x83) {
+    if ( (RCV_State_GearChange = 0x83) & (State_GearChange <> 0x84) ) {
         VCL_Throttle = RCV_Throttle_Compensated
         State_GearChange = 0x84
         
@@ -736,12 +711,10 @@ setSmeshTo118:
 
     
     ;;;;; 4. receive ACK from controller: throttle is increased
-    ;;;;; 5. Switch left gear to 1:18
-	
-    
+    ;;;;; 5. Switch left gear to 1:6
     ;;;;; 6. Reduce throttle right controller
     
-    if (RCV_State_GearChange = 0x86) {
+    if ( (RCV_State_GearChange = 0x86) & (State_GearChange <> 0x87) ) {
         VCL_Throttle = RCV_Throttle_Compensated
         State_GearChange = 0x87
         
@@ -751,53 +724,39 @@ setSmeshTo118:
     
     ;;;;; 7. receive ACK from controller: throttle is reduced
     ;;;;; 8. Increase left throttle
+    ;;;;; 9. Change right gear to 1:6
+    ;;;;; 10. Reduce left throttle to normal
+    ;;;;; 11. Increase throttle right controller to normal
+    ;;;;; 12. Receive ACK: Procedure has finished
     
-    if (RCV_State_GearChange = 0x87) {
-        State_GearChange = 0x87
-    }
-    
-    
-    ;;;;; 10. receive ACK from controller: procedure has started
-    
-    if (RCV_State_GearChange = 0x88) {
-        State_GearChange = 0x88
-    }
-    
-    
-    ;;;;; 11. reduce left throttle to normal
-
-    
-    ;;;;; 12. increase throttle right controller to normal
-    
-    if ( (RCV_State_GearChange = 0x8C) ) {
+    if ( (RCV_State_GearChange = 0x8B) & (State_GearChange <> 0x8D) ) {
         VCL_Throttle = RCV_Throttle_Compensated
+        State_GearChange = 0x8C
         
+        send_mailbox(MAILBOX_SM_MISO2)
+        
+        setup_delay(Smesh_Finished_DLY, SMESH_FININSHED_DELAY)
+        while (Smesh_Finished_DLY_output <> 0) {}
         
     ;;;;; 13. Change is successful, thus speed_to_RPM can be changed
         
         Speed_to_RPM = 1802          ; (G/d)*5305 ... 18/530*5305 ... One decimal
         
         ; Gear state to complete
+        
         State_GearChange = 0x8D
-        
-        send_mailbox(MAILBOX_SM_MISO2)
-        
-        Setup_Delay(General_DLY, SMESH_FININSHED_DELAY)
-        while (General_DLY_output <> 0) {}
     }
     
     
     ;;;;; Change is not successful
     
-    if ( (Smesh_DLY_output = 0) | (RCV_State_GearChange = 0xFF) ) {
+    if ( ((Smesh_DLY_output = 0) | (RCV_State_GearChange = 0xFF)) & (State_GearChange <> 0x8D) ) {
         ; Send signal that mission is failed
         RCV_State_GearChange = 0;
         State_GearChange = 0xFF
         
         send_mailbox(MAILBOX_SM_MISO2)
         
-        Setup_Delay(General_DLY, SMESH_FININSHED_DELAY)
-        while (General_DLY_output <> 0) {}
     }
 	
 	
