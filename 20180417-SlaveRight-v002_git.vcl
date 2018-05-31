@@ -2,7 +2,7 @@
 ;					Controller Slave - Slave motor controller (Right)
 ;===============================================================================================
 
-; GIT: MASTER
+; GIT: Smesh
 
 ; Author:	Tim Stek
 ; Organization:	TU/ecomotive
