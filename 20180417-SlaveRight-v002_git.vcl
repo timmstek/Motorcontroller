@@ -2,7 +2,7 @@
 ;					Controller Slave - Slave motor controller (Right)
 ;===============================================================================================
 
-; GIT: Smesh
+; GIT: MASTER
 
 ; Author:	Tim Stek
 ; Organization:	TU/ecomotive
@@ -310,14 +310,14 @@ startup_CAN_System:
 
     Setup_Mailbox(MAILBOX_SM_MISO1, 0, 0, 0x111, C_CYCLIC, C_XMT, 0, 0)
 
-    Setup_Mailbox_Data(MAILBOX_SM_MISO1, 6,			
+    Setup_Mailbox_Data(MAILBOX_SM_MISO1, 7,			
         @System_Action,				        ; DC battery current , calculated not measured
-        @System_Action + USEHB,
+        @System_Action + USEHB, 
+        @RM_Efficiency,                         ; Efficiency right controller,
         @Motor_Temperature_Display,			    ; Motor temperature 0-255°C
         @Controller_Temperature_Display,        ; Controller temperature  0-255°C
         @State_GearChange,                      ; Gear change state
         @Fault_System,
-        0,
         0)                          ; Fault system
 		
 
@@ -438,10 +438,8 @@ startup_CAN_System:
 
 
 CheckCANMailboxes:
-    
+
     call calculateTemperature
-    
-    
 
     return
     
@@ -589,10 +587,19 @@ DNR_statemachine:
     
     
     
-calculateTemperature:
+calculateTemperatureAndEfficiency:
     
-    Motor_Temperature_Display = Map_Two_Points(Motor_Temperature, 0, 2550, 0, 255)
-    Controller_Temperature_Display = Map_Two_Points(Controller_Temperature, 0, 2550, 0, 255)
+    Motor_Temperature_Display = Motor_Temperature/10
+    Controller_Temperature_Display = Controller_Temperature/10
+    
+    
+    temp_Calculation = Capacitor_Voltage / 640
+    Power_In = Battery_Current * temp_Calculation       ; Battery_Current  ; Capacitor_Voltage 0-200V (0-12800)
+    
+    Motor_Rads = Map_Two_Points(Motor_RPM, -12000, 12000, -1257, 1257)
+    Power_Out = Motor_Torque * Motor_Rads               ; Motor_Torque ; Motor_RPM -12000-12000rpm (-12000-12000)
+    
+    RM_Efficiency = get_muldiv(MTD1, Power_Out, 255, Power_In)
     
     return
     
