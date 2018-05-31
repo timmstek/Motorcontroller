@@ -65,6 +65,7 @@ DEBOUNCE_INPUTS					constant    5		; this sets the debounce time for switch inpu
 ; CAN
 CAN_EMERGENCY_DELAY_ACK         constant    50      ; Amount of time system waits until sending next emergency message
 CAN_CYCLIC_RATE					constant    25	    ; this sets the cyclic cycle to every 100 ms, 4mS/unit
+CAN_DELAY_FOR_ACK               constant    100
 
 ; Timers
 MAX_TIME_GEARCHANGE			    constant    1500    ; Maximum time gear change may take [ms]
@@ -96,10 +97,13 @@ REVERSE                         constant    4
 
 create reset_controller_remote variable
 
-;-------------- Emergency CAN ---------------
+;-------------- CAN ---------------
 
 create RCV_ACK_Fault_System variable
 create RCV_ACK_System_Action variable
+
+create Request_Param_Status variable
+create Request_Slave_Param variable
 
 ;-------------- Temporaries ---------------
 create  temp_Map_Output_1   variable
@@ -153,6 +157,11 @@ MAILBOX_SM_MISO2						alias CAN5
 MAILBOX_ERROR_MESSAGES                  alias CAN19
 MAILBOX_ERROR_MESSAGES_RCV_ACK          alias CAN20
 MAILBOX_ERROR_MESSAGES_RCV_ACK_received alias CAN20_output
+MAILBOX_MISO_REQUEST_PARAM              alias CAN21
+MAILBOX_MOSI_INIT_PARAM1                alias CAN22
+MAILBOX_MOSI_INIT_PARAM1_received       alias CAN22_received
+MAILBOX_MOSI_INIT_PARAM2                alias CAN23
+MAILBOX_MOSI_INIT_PARAM2_received       alias CAN23_received
 
 
 ;----------- User Defined Faults ------------
@@ -215,6 +224,8 @@ EMERGENCY_ACK_DLY                 alias     DLY4
 EMERGENCY_ACK_DLY_output          alias     DLY4_output
 General_DLY                       alias     DLY5
 General_DLY_output                alias     DLY5_output
+CAN_ACK_DLY                       alias     DLY6
+CAN_ACK_DLY_output                alias     DLY6_output
 
 
 
@@ -313,14 +324,14 @@ startup_CAN_System:
 
     Setup_Mailbox(MAILBOX_SM_MISO1, 0, 0, 0x111, C_CYCLIC, C_XMT, 0, 0)
 
-    Setup_Mailbox_Data(MAILBOX_SM_MISO1, 7,			
+    Setup_Mailbox_Data(MAILBOX_SM_MISO1, 6,			
         @System_Action,				        ; DC battery current , calculated not measured
         @System_Action + USEHB, 
-        @RM_Efficiency,                         ; Efficiency right controller,
         @Motor_Temperature_Display,			    ; Motor temperature 0-255°C
         @Controller_Temperature_Display,        ; Controller temperature  0-255°C
         @State_GearChange,                      ; Gear change state
         @Fault_System,
+        0,
         0)                          ; Fault system
 		
 
@@ -429,6 +440,55 @@ startup_CAN_System:
         0,
         0,
         0)
+        
+        
+            ; MAILBOX 21
+   			; Purpose:		send information: request for init parameters
+   			; Type:			MISO
+   			; Partner:		Master controller
+
+    Setup_Mailbox(MAILBOX_MISO_REQUEST_PARAM, 0, 0, 0x112, C_EVENT, C_XMT, 0, 0)
+    Setup_Mailbox_Data(MAILBOX_MISO_REQUEST_PARAM, 1, 		
+        @Request_Slave_Param,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0)
+        
+            ; MAILBOX 22
+   			; Purpose:		receive information: Parameters at Init
+   			; Type:			MOSI
+   			; Partner:		Master controller
+
+    Setup_Mailbox(MAILBOX_MOSI_INIT_PARAM1, 0, 0, 0x103, C_EVENT, C_RCV, 0, 0)
+    Setup_Mailbox_Data(MAILBOX_MOSI_INIT_PARAM1, 8, 		
+        @Max_Speed_TrqM,
+        @Max_Speed_TrqM + USEHB,				
+        @Accel_Rate_TrqM, 
+        @Accel_Rate_TrqM + USEHB,
+        @Accel_Release_Rate_TrqM,
+        @Accel_Release_Rate_TrqM + USEHB,
+        @Brake_Rate_TrqM,
+        @Brake_Rate_TrqM + USEHB)
+        
+            ; MAILBOX 23
+   			; Purpose:		receive information: Parameters at Init
+   			; Type:			MOSI
+   			; Partner:		Master controller
+
+    Setup_Mailbox(MAILBOX_MOSI_INIT_PARAM2, 0, 0, 0x104, C_EVENT, C_RCV, 0, 0)
+    Setup_Mailbox_Data(MAILBOX_MOSI_INIT_PARAM2, 4, 		
+        @Brake_Release_Rate_TrqM,
+        @Brake_Release_Rate_TrqM + USEHB,				
+        @Neutral_Braking_TrqM, 
+        @Neutral_Braking_TrqM + USEHB,
+        0,
+        0,
+        0,
+        0)
 
 
 
@@ -443,6 +503,36 @@ startup_CAN_System:
 CheckCANMailboxes:
 
     call calculateTemperature
+    
+    ; Receive the right parameters from master
+    
+    if (MAILBOX_MOSI_INIT_PARAM1_received = ON) {
+        
+        MAILBOX_MOSI_INIT_PARAM1_received = OFF
+        Request_Param_Status = 1
+        
+    } else if (MAILBOX_MOSI_INIT_PARAM2_received = ON) {
+        
+        MAILBOX_MOSI_INIT_PARAM2_received = OFF
+        Request_Param_Status = 2
+        
+    }
+    
+    ; Request parameters from master
+    
+    if ( (Request_Param_Status = 0) & (CAN_ACK_DLY_output = 0) ) {
+        
+        Request_Slave_Param = 1
+        
+        send_mailbox(MAILBOX_MISO_REQUEST_PARAM)
+        Setup_Delay(CAN_ACK_DLY, CAN_DELAY_FOR_ACK)
+        
+    } else if ( (Request_Param_Status = 1) & (CAN_ACK_DLY_output = 0) ) {
+        Request_Slave_Param = 2
+        
+        send_mailbox(MAILBOX_MISO_REQUEST_PARAM)
+        Setup_Delay(CAN_ACK_DLY, CAN_DELAY_FOR_ACK)
+    }
 
     return
     
@@ -590,19 +680,10 @@ DNR_statemachine:
     
     
     
-calculateTemperatureAndEfficiency:
+calculateTemperature:
     
-    Motor_Temperature_Display = Motor_Temperature/10
-    Controller_Temperature_Display = Controller_Temperature/10
-    
-    
-    temp_Calculation = Capacitor_Voltage / 640
-    Power_In = Battery_Current * temp_Calculation       ; Battery_Current  ; Capacitor_Voltage 0-200V (0-12800)
-    
-    Motor_Rads = Map_Two_Points(Motor_RPM, -12000, 12000, -1257, 1257)
-    Power_Out = Motor_Torque * Motor_Rads               ; Motor_Torque ; Motor_RPM -12000-12000rpm (-12000-12000)
-    
-    RM_Efficiency = get_muldiv(MTD1, Power_Out, 255, Power_In)
+    Motor_Temperature_Display = Map_Two_Points(Motor_Temperature, 0, 2550, 0, 255)
+    Controller_Temperature_Display = Map_Two_Points(Controller_Temperature, 0, 2550, 0, 255)
     
     return
     

@@ -55,7 +55,11 @@ VCL_App_Ver = 012
 
 ; TO DO:
 ; Get Batteries working with controller. Then get more info from 1 battery
-; transmit parameters to slave
+;- Send parameters to slave
+;- Test Fans
+;- Start Stop System
+;- low prio main loop
+;- Update current limits with power limits
 
 ; TEST:
 ; Errors cleared by key switch cycle 
@@ -176,11 +180,13 @@ create HPO variable
 ;-------------- CAN ---------------
 
 create ACK_RM_Fault_System variable
-create ACK_RCV_System_Action variable
+create ACK_RM_System_Action variable
 create RCV_ACK_Fault_System variable
 create RCV_ACK_Fault_System_Battery variable
 
 create Interlock_XMT variable
+
+create RCV_Request_Slave_Param variable
 
 ;-------------- Temporaries ---------------
 
@@ -302,6 +308,10 @@ Start_Stop_Init_Complete          alias      user64     ; Init of Start Stop sys
 
 test                              alias      user70
     test_bit0                         bit        test.1
+    
+
+    
+RCV_RM_Fault_System               alias     user80
 
 
 
@@ -313,34 +323,73 @@ test                              alias      user70
 ; Messages from and to slave controller
 MAILBOX_SM_MISO1						alias CAN1
 MAILBOX_SM_MISO1_Received				alias CAN1_received
+MAILBOX_SM_MISO1_addr                   constant 0x111
+
 MAILBOX_SM_MOSI1						alias CAN2
+MAILBOX_SM_MOSI1_addr                   constant 0x101
+
 MAILBOX_SM_MOSI2						alias CAN3
+MAILBOX_SM_MOSI2_addr                   constant 0x102
+
 MAILBOX_SM_MOSI3						alias CAN4
+MAILBOX_SM_MOSI3_addr                   constant 0x100
+
 MAILBOX_SM_MISO2						alias CAN5
 MAILBOX_SM_MISO2_Received				alias CAN5_received
+MAILBOX_SM_MISO2_addr                   constant 0x110
+
 
 MAILBOX_RDW_RCV							alias CAN11
 MAILBOX_RDW_RCV_Received				alias CAN11_received
+MAILBOX_RDW_RCV_addr                    constant 0x012
+
 MAILBOX_RDW_XMT							alias CAN12
+MAILBOX_RDW_XMT_addr                    constant 0x200
 
 MAILBOX_DRVSEN_RCV						alias CAN13
 MAILBOX_DRVSEN_RCV_Received				alias CAN13_received
+MAILBOX_DRVSEN_RCV_addr                 constant 0x011
+
 MAILBOX_BRK_RCV							alias CAN14
 MAILBOX_BRK_RCV_Received				alias CAN14_received
+MAILBOX_BRK_RCV_addr                    constant 0x010
+
 
 ; Battery Messages
 MAILBOX_BATT_RCV_InfoA					alias CAN15
 MAILBOX_BATT_RCV_InfoA_received			alias CAN15_received
+MAILBOX_BATT_RCV_InfoA_addr             constant 0x17A
+
 MAILBOX_BATT_RCV_InfoC					alias CAN16
 MAILBOX_BATT_RCV_InfoC_received			alias CAN16_received
+MAILBOX_BATT_RCV_InfoC_addr             constant 0x17C
+
 
 ; Error CAN Messages
 MAILBOX_ERROR_MESSAGES                  alias CAN17
+MAILBOX_ERROR_MESSAGES_addr             constant 0x000
+
 MAILBOX_ERROR_MESSAGES_RCV_ACK              alias CAN18
 MAILBOX_ERROR_MESSAGES_RCV_ACK_received     alias CAN18_received
+MAILBOX_ERROR_MESSAGES_RCV_ACK_addr         constant 0x008
+
 MAILBOX_ERROR_MESSAGES_RCV_RM           alias CAN19
 MAILBOX_ERROR_MESSAGES_RCV_RM_received  alias CAN19_received
+MAILBOX_ERROR_MESSAGES_RCV_RM_addr      constant 0x001
+
 MAILBOX_ERROR_MESSAGES_XMT_ACK_RM       alias CAN20
+MAILBOX_ERROR_MESSAGES_XMT_ACK_RM_addr  constant 0x002
+
+MAILBOX_MISO_REQUEST_PARAM              alias CAN21
+MAILBOX_MISO_REQUEST_PARAM_received     alias CAN21_received
+MAILBOX_MISO_REQUEST_PARAM_addr         constant 0x112
+
+MAILBOX_MOSI_INIT_PARAM1                alias CAN22
+MAILBOX_MOSI_INIT_PARAM1_addr           constant 0x103
+
+MAILBOX_MOSI_INIT_PARAM2                alias CAN23
+MAILBOX_MOSI_INIT_PARAM2_addr           constant 0x104
+
 
 ;------------------- Maps --------------------
 MAP_GEAR16                              alias MAP1
@@ -463,7 +512,6 @@ while (Startup_DLY_output <> 0) {}			; Wait 500ms before start
 
 ; setup inputs
 setup_switches(DEBOUNCE_INPUTS)
-setup_Delay(DLY15, 5000)
 
 ; Ramp
 setup_ramp(FAULT_RAMP, 0, 0, 1)         ; RMP#, Initial value = 0, Move, rate 1/ms
@@ -481,7 +529,8 @@ Battery_Power_Limit = Battery_Power_Limit_Init
 Steerangle_VCL = 125
 RCV_Key_Switch = 1
 RCV_Throttle = 0
-RCV_DNR_Command = 1
+RCV_DNR_Command = 0
+RCV_DNR_Command = 0
 
 
 
@@ -560,15 +609,15 @@ startupCANSystem:
    			; Type:			PDO MISO1
    			; Partner:		Slave Motorcontroller
 
-    Setup_Mailbox(MAILBOX_SM_MISO1, 0, 0, 0x111, C_EVENT, C_RCV, 0, 0)
+    Setup_Mailbox(MAILBOX_SM_MISO1, 0, 0, MAILBOX_SM_MISO1_addr, C_EVENT, C_RCV, 0, 0)
 
-    Setup_Mailbox_Data(MAILBOX_SM_MISO1, 7,			
+    Setup_Mailbox_Data(MAILBOX_SM_MISO1, 6,			
         @RCV_System_Action,				
         @RCV_System_Action + USEHB,
         @RM_Motor_Temperature_Display,			; Motor temperature 0-255°C
         @RM_Controller_Temperature_Display,     ; Controller temperature  0-255°C
         @RCV_State_GearChange,				    ; Smesh enabled
-        @RM_Fault_System,
+        @RCV_RM_Fault_System,
         0,
         0)
         
@@ -580,7 +629,7 @@ startupCANSystem:
    			; Type:			PDO MOSI1
    			; Partner:		Slave Motorcontroller
 
-    Setup_Mailbox(MAILBOX_SM_MOSI1, 0, 0, 0x101, C_CYCLIC, C_XMT, 0, 0)
+    Setup_Mailbox(MAILBOX_SM_MOSI1, 0, 0, MAILBOX_SM_MOSI1_addr, C_CYCLIC, C_XMT, 0, 0)
 
     Setup_Mailbox_Data(MAILBOX_SM_MOSI1, 8,
         @RM_Throttle_Compensated,			; Torque for right motorcontroller
@@ -600,7 +649,7 @@ startupCANSystem:
    			; Type:			PDO MOSI2
    			; Partner:		Slave Motorcontroller
             
-    Setup_Mailbox(MAILBOX_SM_MOSI2, 0, 0, 0x102, C_CYCLIC, C_XMT, 0, 0)
+    Setup_Mailbox(MAILBOX_SM_MOSI2, 0, 0, MAILBOX_SM_MOSI2_addr, C_CYCLIC, C_XMT, 0, 0)
     Setup_Mailbox_Data(MAILBOX_SM_MOSI2, 2,
         @Brake_RCV,
         @Interlock_XMT,
@@ -617,7 +666,7 @@ startupCANSystem:
    			; Type:			PDO MOSI3
    			; Partner:		Slave Motorcontroller
             
-    Setup_Mailbox(MAILBOX_SM_MOSI3, 0, 0, 0x100, C_EVENT, C_XMT, 0, 0)
+    Setup_Mailbox(MAILBOX_SM_MOSI3, 0, 0, MAILBOX_SM_MOSI3_addr, C_EVENT, C_XMT, 0, 0)
 
     Setup_Mailbox_Data(MAILBOX_SM_MOSI3, 5, 		
         @RM_Throttle_Compensated,			
@@ -634,7 +683,7 @@ startupCANSystem:
    			; Type:			PDO MISO2
    			; Partner:		Slave Motorcontroller
          
-    Setup_Mailbox(MAILBOX_SM_MISO2, 0, 0, 0x110, C_EVENT, C_RCV, 0, 0)
+    Setup_Mailbox(MAILBOX_SM_MISO2, 0, 0, MAILBOX_SM_MISO2_addr, C_EVENT, C_RCV, 0, 0)
 
     Setup_Mailbox_Data(MAILBOX_SM_MISO2, 1, 		
         @RCV_State_GearChange,			; Motor torque
@@ -653,7 +702,7 @@ startupCANSystem:
    			; Type:			PDO1
    			; Partner:		RDW Scherm
 
-    Setup_Mailbox(MAILBOX_RDW_RCV, 0, 0, 0x012, C_EVENT, C_RCV, 0, 0)
+    Setup_Mailbox(MAILBOX_RDW_RCV, 0, 0, MAILBOX_RDW_RCV_addr, C_EVENT, C_RCV, 0, 0)
     Setup_Mailbox_Data(MAILBOX_RDW_RCV, 3, 			; DNR switch state
         @RCV_DNR_Command,
 		@RCV_Key_Switch,
@@ -670,7 +719,7 @@ startupCANSystem:
    			; Type:			PDO2
    			; Partner:		RDW Scherm
 
-    Setup_Mailbox(MAILBOX_RDW_XMT, 0, 0, 0x200, C_CYCLIC, C_XMT, 0, 0)
+    Setup_Mailbox(MAILBOX_RDW_XMT, 0, 0, MAILBOX_RDW_XMT_addr, C_CYCLIC, C_XMT, 0, 0)
     Setup_Mailbox_Data(MAILBOX_RDW_XMT, 8,
         @Vehicle_Speed,				; Speed of the wheels
         @Temp_Motor_Display,		; Temperature of Motors
@@ -687,7 +736,7 @@ startupCANSystem:
    			; Type:			PDO3
    			; Partner:		Interieur Verlichting?
 
-    Setup_Mailbox(MAILBOX_DRVSEN_RCV, 0, 0, 0x011, C_EVENT, C_RCV, 0, 0)
+    Setup_Mailbox(MAILBOX_DRVSEN_RCV, 0, 0, MAILBOX_DRVSEN_RCV_addr, C_EVENT, C_RCV, 0, 0)
     Setup_Mailbox_Data(MAILBOX_DRVSEN_RCV, 1, 		; Efficiency
         @RCV_Throttle,					; Throttle pedal
         0,
@@ -704,7 +753,7 @@ startupCANSystem:
    			; Type:			PDO4
    			; Partner:		Achterlichten
 
-    Setup_Mailbox(MAILBOX_BRK_RCV, 0, 0, 0x010, C_EVENT, C_RCV, 0, 0)
+    Setup_Mailbox(MAILBOX_BRK_RCV, 0, 0, MAILBOX_BRK_RCV_addr, C_EVENT, C_RCV, 0, 0)
     Setup_Mailbox_Data(MAILBOX_BRK_RCV, 1, 		; Brake pedal state input
         @Brake_RCV,
 		0,
@@ -721,7 +770,7 @@ startupCANSystem:
    			; Type:			PDO5
    			; Partner:		Batteries
 
-    Setup_Mailbox(MAILBOX_BATT_RCV_InfoA, 0, 0, 0x17A, C_EVENT, C_RCV, 0, 0)
+    Setup_Mailbox(MAILBOX_BATT_RCV_InfoA, 0, 0, MAILBOX_BATT_RCV_InfoA_addr, C_EVENT, C_RCV, 0, 0)
     Setup_Mailbox_Data(MAILBOX_BATT_RCV_InfoA, 8, 		
         @Batt_Serial1,					; Serial number Battery
         @Batt_Serial1 + USEHB,
@@ -738,7 +787,7 @@ startupCANSystem:
    			; Type:			PDO6
    			; Partner:		Batteries
 
-    Setup_Mailbox(MAILBOX_BATT_RCV_InfoC, 0, 0, 0x17C, C_EVENT, C_RCV, 0, 0)
+    Setup_Mailbox(MAILBOX_BATT_RCV_InfoC, 0, 0, MAILBOX_BATT_RCV_InfoC_addr, C_EVENT, C_RCV, 0, 0)
     Setup_Mailbox_Data(MAILBOX_BATT_RCV_InfoC, 8, 		
         @Batt_Serial1,					; Serial number Battery
         @Batt_Serial1 + USEHB,
@@ -755,7 +804,7 @@ startupCANSystem:
    			; Type:			PDO6
    			; Partner:		RDW Scherm and Slave controller
 
-    Setup_Mailbox(MAILBOX_ERROR_MESSAGES, 0, 0, 0x000, C_EVENT, C_XMT, 0, 0)
+    Setup_Mailbox(MAILBOX_ERROR_MESSAGES, 0, 0, MAILBOX_ERROR_MESSAGES_addr, C_EVENT, C_XMT, 0, 0)
     Setup_Mailbox_Data(MAILBOX_ERROR_MESSAGES, 3, 		
         @Fault_System,
         @Fault_System_Battery,
@@ -771,7 +820,7 @@ startupCANSystem:
    			; Type:			PDO6
    			; Partner:		Batteries
 
-    Setup_Mailbox(MAILBOX_ERROR_MESSAGES_RCV_ACK, 0, 0, 0x008, C_EVENT, C_RCV, 0, 0)
+    Setup_Mailbox(MAILBOX_ERROR_MESSAGES_RCV_ACK, 0, 0, MAILBOX_ERROR_MESSAGES_RCV_ACK_addr, C_EVENT, C_RCV, 0, 0)
     Setup_Mailbox_Data(MAILBOX_ERROR_MESSAGES_RCV_ACK, 2, 		
         @RCV_ACK_Fault_System,
         @RCV_ACK_Fault_System_Battery,
@@ -788,9 +837,9 @@ startupCANSystem:
    			; Type:			PDO6
    			; Partner:		Slave controller
 
-    Setup_Mailbox(MAILBOX_ERROR_MESSAGES_RCV_RM, 0, 0, 0x001, C_EVENT, C_RCV, 0, 0)
+    Setup_Mailbox(MAILBOX_ERROR_MESSAGES_RCV_RM, 0, 0, MAILBOX_ERROR_MESSAGES_RCV_RM_addr, C_EVENT, C_RCV, 0, 0)
     Setup_Mailbox_Data(MAILBOX_ERROR_MESSAGES_RCV_RM, 3, 		
-        @RM_Fault_System,
+        @RCV_RM_Fault_System,
         @RCV_System_Action,				
         @RCV_System_Action + USEHB, 
         0,
@@ -805,12 +854,61 @@ startupCANSystem:
    			; Type:			PDO6
    			; Partner:		Slave controller
 
-    Setup_Mailbox(MAILBOX_ERROR_MESSAGES_XMT_ACK_RM, 0, 0, 0x002, C_EVENT, C_XMT, 0, 0)
+    Setup_Mailbox(MAILBOX_ERROR_MESSAGES_XMT_ACK_RM, 0, 0, MAILBOX_ERROR_MESSAGES_XMT_ACK_RM_addr, C_EVENT, C_XMT, 0, 0)
     Setup_Mailbox_Data(MAILBOX_ERROR_MESSAGES_XMT_ACK_RM, 3, 		
         @ACK_RM_Fault_System,
-        @ACK_RCV_System_Action,				
-        @ACK_RCV_System_Action + USEHB, 
+        @ACK_RM_System_Action,				
+        @ACK_RM_System_Action + USEHB, 
         0,
+        0,
+        0,
+        0,
+        0)
+        
+        
+            ; MAILBOX 21
+   			; Purpose:		receive information: request for init parameters
+   			; Type:			MISO
+   			; Partner:		Slave controller
+
+    Setup_Mailbox(MAILBOX_MISO_REQUEST_PARAM, 0, 0, MAILBOX_MISO_REQUEST_PARAM_addr, C_EVENT, C_RCV, 0, 0)
+    Setup_Mailbox_Data(MAILBOX_MISO_REQUEST_PARAM, 1, 		
+        @RCV_Request_Slave_Param,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0)
+        
+            ; MAILBOX 22
+   			; Purpose:		send information: Parameters at Init
+   			; Type:			MOSI
+   			; Partner:		Slave controller
+
+    Setup_Mailbox(MAILBOX_MOSI_INIT_PARAM1, 0, 0, MAILBOX_MOSI_INIT_PARAM1_addr, C_EVENT, C_XMT, 0, 0)
+    Setup_Mailbox_Data(MAILBOX_MOSI_INIT_PARAM1, 8, 		
+        @Max_Speed_TrqM,
+        @Max_Speed_TrqM + USEHB,				
+        @Accel_Rate_TrqM, 
+        @Accel_Rate_TrqM + USEHB,
+        @Accel_Release_Rate_TrqM,
+        @Accel_Release_Rate_TrqM + USEHB,
+        @Brake_Rate_TrqM,
+        @Brake_Rate_TrqM + USEHB)
+        
+            ; MAILBOX 23
+   			; Purpose:		send information: Parameters at Init
+   			; Type:			MOSI
+   			; Partner:		Slave controller
+
+    Setup_Mailbox(MAILBOX_MOSI_INIT_PARAM2, 0, 0, MAILBOX_MOSI_INIT_PARAM2_addr, C_EVENT, C_XMT, 0, 0)
+    Setup_Mailbox_Data(MAILBOX_MOSI_INIT_PARAM2, 4, 		
+        @Brake_Release_Rate_TrqM,
+        @Brake_Release_Rate_TrqM + USEHB,				
+        @Neutral_Braking_TrqM, 
+        @Neutral_Braking_TrqM + USEHB,
         0,
         0,
         0,
@@ -830,23 +928,35 @@ CheckCANMailboxes:
 
     ;send low priority mailboxes
     
-    if (Low_Priority_Mailbox_DLY = 0) {
-        Setup_Delay(Low_Priority_Mailbox_DLY, CAN_LOWPRIORITY_RATE)
-        
+    if (Low_Priority_Mailbox_DLY_output = 0) {
         send_mailbox(MAILBOX_ERROR_MESSAGES)
+        
+        Setup_Delay(Low_Priority_Mailbox_DLY, CAN_LOWPRIORITY_RATE)
     }
     
     if (MAILBOX_ERROR_MESSAGES_RCV_RM_received = ON) {
         MAILBOX_ERROR_MESSAGES_RCV_RM_received = OFF
         
-        ACK_RM_Fault_System = RM_Fault_System
-        ACK_RCV_System_Action = RCV_System_Action
+        ACK_RM_Fault_System = RCV_RM_Fault_System
+        ACK_RM_System_Action = RCV_System_Action
         
         send_mailbox(MAILBOX_ERROR_MESSAGES_XMT_ACK_RM)
         
     }
     
     Interlock_XMT = Interlock_State
+    
+    
+    ; Request from slave to send parameters
+    if (MAILBOX_MISO_REQUEST_PARAM_received = ON) {
+        MAILBOX_MISO_REQUEST_PARAM_received = OFF
+        
+        if (RCV_Request_Slave_Param = 1) {
+            send_mailbox(MAILBOX_MOSI_INIT_PARAM1)
+        } else if (RCV_Request_Slave_Param = 2) {
+            send_mailbox(MAILBOX_MOSI_INIT_PARAM2)
+        }
+    }
     
 
     return
@@ -893,6 +1003,10 @@ clear_Obsolete_Errors:
     }
 	if ( (Batt_EEPROM_ERROR = OFF) & (Batt_CM_CRC = OFF) & (Batt_CM_FAULT = OFF) & (Batt_LeakCurrent = OFF) ) {
         General_Fault = OFF
+    }
+    
+    if (RCV_RM_Fault_System = 0) {
+        RM_Fault_System = RCV_RM_Fault_System
     }
 
 
@@ -953,6 +1067,10 @@ retrieve_Errors:
     
     if (RCV_System_Action <> 0) {
         System_Action = RCV_System_Action
+    }
+    
+    if (RCV_RM_Fault_System <> 0) {
+        RM_Fault_System = RCV_RM_Fault_System
     }
     
     
@@ -1052,7 +1170,7 @@ faultHandling:
         RM_Regen_Current_Limit = INIT_REGEN_OUTPUT_CURLIM
     }
     
-    if ( (System_Action <> 0) | (Fault_System <> 0) | (RM_Fault_System <> 0) | (Fault_System_Battery <> 0) ) {
+    if ( (System_Action <> 0) | (Fault_System <> 0) | (RCV_RM_Fault_System <> 0) | (Fault_System_Battery <> 0) ) {
         ; There is some fault, so send to RDW scherm
         
         if ( (EMERGENCY_ACK_DLY_output = 0) & (RCV_ACK_Fault_System <> Fault_System) & (RCV_ACK_Fault_System_Battery <> Fault_System_Battery) ) {
