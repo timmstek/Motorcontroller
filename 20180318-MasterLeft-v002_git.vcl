@@ -102,6 +102,9 @@ CAN_EMERGENCY_DELAY_ACK         constant    100
 CAN_LOWPRIORITY_RATE            constant    800     ; sets the cyclic rate of low priority mailboxes
 CAN_CYCLIC_RATE					constant    25		; this sets the cyclic cycle to every 100 ms, 4mS/unit
 
+MULTIPLIER_CAN_NOTHING_RECEIVE  constant    2       ; Cyclic Rate times 2. If nothing is received from slave for this amount of time, create error
+CAN_NOTHING_RECEIVE_INIT        constant    1000
+
 ; Fan Settings
 FAN_TEMPERATURE_HYSTER          constant    5       ; Temperature should first drop this amount under threshold to turn off fans
 MOTOR_COOLDOWN_THOLD            constant    60      ; from this temperature in C Fans will turn on
@@ -124,9 +127,9 @@ TIME_TO_FULL_LOS_FAULT          constant    10000    ; Time it takes to go to fu
                                                     ; Due to a fault, max 6000 ms
 
 ; DNR, Gear change and steering settings
-GEAR_CHANGE_BEFORE_DELAY        constant    1000
+GEAR_CHANGE_BEFORE_DELAY        constant    2000
 GEAR_CHANGE_AFTER_DELAY         constant    500
-PROTECTION_DELAY_GRCHANGE       constant    10000    ; Allowed to only change gear once per second, in ms
+PROTECTION_DELAY_GRCHANGE       constant    5000    ; Allowed to only change gear once per second, in ms
 THROTTLE_MULTIP_REDUCE          constant    26      ; 26/128 = 0.2 multiplier for reducing throttle during gear change
 THROTTLE_MULTIP_INCREASE        constant    128     ; 230/128 = 1.8 multiplier to compensate for reduced throttle
 MAX_SPEED_CHANGE_DNR            constant    80      ; in km/h, with 1 decimal
@@ -492,6 +495,8 @@ Low_Prio_Loop_DLY                 alias     DLY7
 Low_Prio_Loop_DLY_output          alias     DLY7_output
 Gear_Change_DLY                   alias     DLY8
 Gear_Change_DLY_output            alias     DLY8_output
+Comm_Slave_Error_DLY              alias     DLY9
+Comm_Slave_Error_DLY_ouput        alias     DLY9_output
 
 FAULT_TIMER                       alias      TMR1
 FAULT_TIMER_ms_output             alias      TMR1_ms_output
@@ -534,6 +539,8 @@ set_ramp_target(FAULT_RAMP, 0)          ; Target init is 0ms
 ;Initiate sytems
 call startupCANSystem 		;setup and start the CAN communications system
 call setup_2D_MAP
+
+setup_delay(Comm_Slave_Error_DLY, CAN_NOTHING_RECEIVE_INIT)
 
 MAX_STEER_COMPENSATION = INIT_STEER_COMPENSATION            ; 120/255 = 47% reduction on inner wheel with max steering
 
@@ -976,6 +983,17 @@ CheckCANMailboxes:
         }
     }
     
+    
+    ; When nothing received from Slave, create error
+    
+    if (MAILBOX_SM_MISO1_Received = ON) {
+        MAILBOX_SM_MISO1_Received = OFF
+        
+        temp_Calculation = CAN_CYCLIC_RATE * 4 * MULTIPLIER_CAN_NOTHING_RECEIVE
+        setup_delay(Comm_Slave_Error_DLY, temp_Calculation)
+        
+    }
+    
 
     return
     
@@ -1015,7 +1033,7 @@ clear_Obsolete_Errors:
         
         
     }
-	if ( (Batt_CM_ALERT = OFF) & (Batt_PowerStage_ERROR = OFF) ) {
+	if ( (Batt_CM_ALERT = OFF) & (Batt_PowerStage_ERROR = OFF) & (Comm_Slave_Error_DLY_ouput <> 0) ) {
         General_Crit_Error = OFF
         
     }
@@ -1026,7 +1044,6 @@ clear_Obsolete_Errors:
     if (RCV_RM_Fault_System = 0) {
         RM_Fault_System = RCV_RM_Fault_System
     }
-
 
     return
     
@@ -1089,6 +1106,13 @@ retrieve_Errors:
     
     if (RCV_RM_Fault_System <> 0) {
         RM_Fault_System = RCV_RM_Fault_System
+    }
+    
+    
+    if (Comm_Slave_Error_DLY_ouput = 0) {
+        ; Silence from Slave over CAN, so create error
+        
+        General_Crit_Error = ON
     }
     
     

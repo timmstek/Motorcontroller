@@ -67,6 +67,9 @@ CAN_EMERGENCY_DELAY_ACK         constant    50      ; Amount of time system wait
 CAN_CYCLIC_RATE					constant    25	    ; this sets the cyclic cycle to every 100 ms, 4mS/unit
 CAN_DELAY_FOR_ACK               constant    100
 
+MULTIPLIER_CAN_NOTHING_RECEIVE  constant    2       ; Cyclic Rate times 2. If nothing is received from slave for this amount of time, create error
+CAN_NOTHING_RECEIVE_INIT        constant    1000
+
 ; Timers
 MAX_TIME_GEARCHANGE			    constant    1500    ; Maximum time gear change may take [ms]
 STARTUP_DELAY                   constant    3000    ; Delay before system starts up [ms]
@@ -246,6 +249,8 @@ General_DLY                       alias     DLY5
 General_DLY_output                alias     DLY5_output
 CAN_ACK_DLY                       alias     DLY6
 CAN_ACK_DLY_output                alias     DLY6_output
+Comm_Master_Error_DLY             alias     DLY7
+Comm_Master_Error_DLY_ouput       alias     DLY7_output
 
 
 
@@ -271,6 +276,8 @@ setup_switches(DEBOUNCE_INPUTS)
 
 ;Initiate sytems
 call startup_CAN_System 		;setup and start the CAN communications system
+
+setup_delay(Comm_Master_Error_DLY, CAN_NOTHING_RECEIVE_INIT)
 
 
 
@@ -356,7 +363,7 @@ startup_CAN_System:
 
 
    			; MAILBOX 2
-   			; Purpose:		Send information: Torque, Speed, Smesh enabled and fault codes
+   			; Purpose:		Receive information: Torque, Speed, Smesh enabled and fault codes
    			; Type:			PDO2 MOSI1
    			; Partner:		Slave Motorcontroller
         
@@ -552,6 +559,17 @@ CheckCANMailboxes:
         send_mailbox(MAILBOX_MISO_REQUEST_PARAM)
         Setup_Delay(CAN_ACK_DLY, CAN_DELAY_FOR_ACK)
     }
+    
+    
+    ; When nothing received from Master, create error
+    
+    if (MAILBOX_SM_MOSI1_Received = ON) {
+        MAILBOX_SM_MOSI1_Received = OFF
+        
+        temp_Calculation = CAN_CYCLIC_RATE * 4 * MULTIPLIER_CAN_NOTHING_RECEIVE
+        setup_delay(Comm_Master_Error_DLY, temp_Calculation)
+        
+    }
 
     return
     
@@ -587,6 +605,15 @@ faultHandling:
         ; Limits are controlled by master controller
         
     }
+    
+    
+    ; Silence from Master over CAN, so create error
+    if ( (Comm_Master_Error_DLY_ouput <> 0)) {
+        General_Crit_Error = OFF
+    } else {
+        General_Crit_Error = ON
+    }
+    
     
     if ( (System_Action <> 0) | (Fault_System <> 0) ) {
         ; There is some fault, so send to Master controller
