@@ -50,13 +50,11 @@ VCL_App_Ver = 012
 ;  QUESTIONS CURTIS:
 ;;;;   Battery_Current, how many decimals (0-12800)? 
 ;;;;   Brake command does not override throttle command ; When error is encountered again, send tact file
-;;;;   Full throttle current limit
 
 
 ; TO DO:
 ; Get Batteries working with controller. Then get more info from 1 battery
 ;- low prio main loop           <- causes deadlock
-;- Update current limits with power limits
 
 ; TEST:
 ; Errors cleared by key switch cycle 
@@ -114,14 +112,16 @@ CONTR_TEMP_FAN_MAX              constant    75
 FANSPEED_IDLE                   constant    10      ; In idle mode, fans will always run at 10%
 
 ; Current settings
-Battery_Power_Limit_Init        constant    20      ; per 10W
+BATT_DRIVE_PWR_LIM_INIT         constant    20          ; per 10W
+BATT_REGEN_PWR_LIM_INIT         constant    20           ; per 10W
 
-INIT_DRIVE_OUTPUT_CURLIM         constant   28086        ; 300A  /350A*32767
-INIT_REGEN_OUTPUT_CURLIM         constant   5617         ; 60A  /350A*32767
+CURRENT_THRESHOLD_POWER_LIMITING    constant    20          ; When regen or drive current is higher, than power limiting is enabled
+
+BATTERY_DRIVE_POWER_LIMIT_MIN   constant    0
+BATTERY_REGEN_POWER_LIMIT_MIN   constant    0
 
 REDUCED_DRIVE_INPUT_CURLIM_PERC constant    60      ; Drive current limit is 60%, when fault is detected
 REDUCED_REGEN_INPUT_CURLIM_PERC constant    15      ; Regen current limit is 15%, when fault is detected
-REDUCED_THROTTLE_MULTIPLIER     constant    75      ; 60% of 128 = 75
 REVERSE_THROTTLE_MULTIPLIER     constant    128     ; 90% of 128 = 115
 TIME_TO_FULL_LOS_FAULT          constant    10000    ; Time it takes to go to full effect of the reduced current limits
                                                     ; Due to a fault, max 6000 ms
@@ -192,6 +192,9 @@ create RCV_ACK_Fault_System_Battery variable
 create Interlock_XMT variable
 
 create RCV_Request_Slave_Param variable
+
+create XMT_BATT_DRIVE_PWR_LIM_INIT variable
+create XMT_CURRENT_THRESHOLD_POWER_LIMITING variable
 
 ;-------------- Temporaries ---------------
 
@@ -286,8 +289,10 @@ Steerangle_VCL                        alias      user23     ; Steerangle_VCL
 
 
 ; Current limits
-RM_Regen_Current_Limit            alias      user30     ; Regen current limit for Right controller
-RM_Drive_Current_Limit            alias      user31     ; Drive current limit for left controller
+RM_Battery_Regen_Power_Limit            alias      user30     ; Regen current limit for Right controller
+RM_Battery_Drive_Power_Limit            alias      user31     ; Drive current limit for Right controller
+Battery_Regen_Power_Limit               alias      user32     ; Regen current limit for Left controller
+Battery_Drive_Power_Limit               alias      user33     ; Drive current limit for Left controller
 
 
 ; DNR and Throttle
@@ -508,9 +513,13 @@ TEST_TIMER_ms_output             alias      TMR2_ms_output
 TEST_TIMER_sec_output            alias      TMR2_sec_output
 TEST_TIMER_enable                alias      TMR2_enable
 
-FAULT_RAMP                       alias      RMP1
-FAULT_RAMP_output                alias      RMP1_output
-FAULT_RAMP_hold                  alias      RMP1_hold
+REGEN_FAULT_RAMP                       alias      RMP1
+REGEN_FAULT_RAMP_output                alias      RMP1_output
+REGEN_FAULT_RAMP_hold                  alias      RMP1_hold
+
+DRIVE_FAULT_RAMP                       alias      RMP2
+DRIVE_FAULT_RAMP_output                alias      RMP2_output
+DRIVE_FAULT_RAMP_hold                  alias      RMP2_hold
 
 
 
@@ -533,8 +542,11 @@ while (Startup_DLY_output <> 0) {}			; Wait 500ms before start
 setup_switches(DEBOUNCE_INPUTS)
 
 ; Ramp
-setup_ramp(FAULT_RAMP, 0, 0, 1)         ; RMP#, Initial value = 0, Move, rate 1/ms
-set_ramp_target(FAULT_RAMP, 0)          ; Target init is 0ms
+setup_ramp(REGEN_FAULT_RAMP, 0, 0, 1)         ; RMP#, Initial value = 0, Move, rate 1/ms
+set_ramp_target(REGEN_FAULT_RAMP, 0)          ; Target init is 0ms
+
+setup_ramp(DRIVE_FAULT_RAMP, 0, 0, 1)         ; RMP#, Initial value = 0, Move, rate 1/ms
+set_ramp_target(DRIVE_FAULT_RAMP, 0)          ; Target init is 0ms
 
 ;Initiate sytems
 call startupCANSystem 		;setup and start the CAN communications system
@@ -544,7 +556,12 @@ setup_delay(Comm_Slave_Error_DLY, CAN_NOTHING_RECEIVE_INIT)
 
 MAX_STEER_COMPENSATION = INIT_STEER_COMPENSATION            ; 120/255 = 47% reduction on inner wheel with max steering
 
-Battery_Power_Limit = Battery_Power_Limit_Init
+XMT_BATT_DRIVE_PWR_LIM_INIT = BATT_DRIVE_PWR_LIM_INIT
+XMT_CURRENT_THRESHOLD_POWER_LIMITING = CURRENT_THRESHOLD_POWER_LIMITING
+
+Battery_Drive_Power_Limit = BATT_DRIVE_PWR_LIM_INIT
+Battery_Regen_Power_Limit = BATT_REGEN_PWR_LIM_INIT
+Battery_Power_Limit = BATT_DRIVE_PWR_LIM_INIT
 
 ; For testing purposes
 Steerangle_VCL = 125
@@ -660,10 +677,10 @@ startupCANSystem:
         @RM_Throttle_Compensated,			; Torque for right motorcontroller
         @RM_Throttle_Compensated + USEHB, 
         @State_GearChange,			        ; Command to change gear
-        @RM_Drive_Current_Limit,						; Set max speed
-        @RM_Drive_Current_Limit + USEHB,
-        @RM_Regen_Current_Limit,					; Set Regen limit
-        @RM_Regen_Current_Limit + USEHB, 
+        @RM_Battery_Drive_Power_Limit,						; Set max speed
+        @RM_Battery_Drive_Power_Limit + USEHB,
+        @RM_Battery_Regen_Power_Limit,					; Set Regen limit
+        @RM_Battery_Regen_Power_Limit + USEHB, 
         @DNR_Command)
 		
 		
@@ -693,15 +710,15 @@ startupCANSystem:
             
     Setup_Mailbox(MAILBOX_SM_MOSI3, 0, 0, MAILBOX_SM_MOSI3_addr, C_EVENT, C_XMT, 0, 0)
 
-    Setup_Mailbox_Data(MAILBOX_SM_MOSI3, 6, 		
+    Setup_Mailbox_Data(MAILBOX_SM_MOSI3, 4, 		
         @RM_Throttle_Compensated,			
         @RM_Throttle_Compensated + USEHB,
-        @RM_Drive_Current_Limit,
-        @RM_Drive_Current_Limit + USEHB,
         @State_GearChange,				
         @reset_controller_remote, 
         0,
-		0)
+		0,
+        0,
+        0)
             
             ; MAILBOX 5
    			; Purpose:		Receive information:
@@ -752,7 +769,7 @@ startupCANSystem:
         @state_DNR,			    ; Temperature errors from Batteries
         @Temp_Index_Display,		; Index which motor, controller and battery is the hottest (M-C)
         @LM_Efficiency,            ; Regen, Eco or power region
-		    @State_Of_Charge,
+		@State_Of_Charge,
         0)
 
 
@@ -929,15 +946,15 @@ startupCANSystem:
    			; Partner:		Slave controller
 
     Setup_Mailbox(MAILBOX_MOSI_INIT_PARAM2, 0, 0, MAILBOX_MOSI_INIT_PARAM2_addr, C_EVENT, C_XMT, 0, 0)
-    Setup_Mailbox_Data(MAILBOX_MOSI_INIT_PARAM2, 4, 		
+    Setup_Mailbox_Data(MAILBOX_MOSI_INIT_PARAM2, 8, 		
         @Brake_Release_Rate_TrqM,
         @Brake_Release_Rate_TrqM + USEHB,				
         @Neutral_Braking_TrqM, 
         @Neutral_Braking_TrqM + USEHB,
-        0,
-        0,
-        0,
-        0)
+        @XMT_BATT_DRIVE_PWR_LIM_INIT,
+        @XMT_BATT_DRIVE_PWR_LIM_INIT + USEHB,
+        @XMT_CURRENT_THRESHOLD_POWER_LIMITING,
+        @XMT_CURRENT_THRESHOLD_POWER_LIMITING + USEHB)
         
 
 
@@ -1128,89 +1145,71 @@ faultHandling:
     
     call retrieve_Errors
     
+    
+    
     if ( (Regen_Fault = ON) | (RM_Regen_Fault = ON) ) {
         
-        set_ramp_target(FAULT_RAMP, TIME_TO_FULL_LOS_FAULT)          ; Target is 6000ms
-        
-        temp_Map_Output_1 = Map_Two_Points(FAULT_RAMP_output, 0, TIME_TO_FULL_LOS_FAULT, 100, REDUCED_REGEN_INPUT_CURLIM_PERC)
-        
-        
-        Regen_Current_Limit = Map_Two_Points(temp_Map_Output_1, 0, 100, 1638, INIT_REGEN_OUTPUT_CURLIM)
-        Brake_Current_Limit = Regen_Current_Limit
-        Interlock_Brake_Current_Limit = Regen_Current_Limit
-        
-        RM_Regen_Current_Limit = Regen_Current_Limit
+        set_ramp_target(REGEN_FAULT_RAMP, TIME_TO_FULL_LOS_FAULT)          ; Target is 6000ms
         
     }
     if ( (Drive_Fault = ON) | (RM_Drive_Fault = ON) ) {
         
-        set_ramp_target(FAULT_RAMP, TIME_TO_FULL_LOS_FAULT)          ; Target is 6000ms
-        
-        Throttle_Multiplier = REDUCED_THROTTLE_MULTIPLIER        ; Reduce throttle to 80% = 102/128
-
-        temp_Map_Output_1 = Map_Two_Points(FAULT_RAMP_output, 0, TIME_TO_FULL_LOS_FAULT, 100, REDUCED_DRIVE_INPUT_CURLIM_PERC)
-
-        Drive_Current_Limit = Map_Two_Points(temp_Map_Output_1, 0, 100, 1638, INIT_DRIVE_OUTPUT_CURLIM)
-        RM_Drive_Current_Limit = Drive_Current_Limit
+        set_ramp_target(DRIVE_FAULT_RAMP, TIME_TO_FULL_LOS_FAULT)          ; Target is 6000ms 
         
     }
     if ( (Temp_Fault = ON) | (RM_Temp_Fault = ON) ) {
         
-        set_ramp_target(FAULT_RAMP, TIME_TO_FULL_LOS_FAULT)          ; Target is 6000ms
+        set_ramp_target(DRIVE_FAULT_RAMP, TIME_TO_FULL_LOS_FAULT)          ; Target is 6000ms
         
-        Throttle_Multiplier = REDUCED_THROTTLE_MULTIPLIER        ; Reduce throttle to 80% = 102/128
-        
-        temp_Map_Output_1 = Map_Two_Points(FAULT_RAMP_output, 0, TIME_TO_FULL_LOS_FAULT, 100, REDUCED_REGEN_INPUT_CURLIM_PERC)
-        temp_Map_Output_2 = Map_Two_Points(FAULT_RAMP_output, 0, TIME_TO_FULL_LOS_FAULT, 100, REDUCED_DRIVE_INPUT_CURLIM_PERC)
-        
-        Drive_Current_Limit = Map_Two_Points(temp_Map_Output_1, 0, 100, 1638, INIT_DRIVE_OUTPUT_CURLIM)
-        
-        Regen_Current_Limit = Map_Two_Points(temp_Map_Output_1, 0, 100, 1638, INIT_REGEN_OUTPUT_CURLIM)
-        Brake_Current_Limit = Regen_Current_Limit
-        Interlock_Brake_Current_Limit = Regen_Current_Limit
-        
-        RM_Drive_Current_Limit = Drive_Current_Limit
-        RM_Regen_Current_Limit = Regen_Current_Limit
+        set_ramp_target(REGEN_FAULT_RAMP, TIME_TO_FULL_LOS_FAULT)          ; Target is 6000ms
         
     }
     if ( (General_Fault = ON) | (RM_General_Fault = ON) ) {
         
-        set_ramp_target(FAULT_RAMP, TIME_TO_FULL_LOS_FAULT)          ; Target is 6000ms
+        set_ramp_target(DRIVE_FAULT_RAMP, TIME_TO_FULL_LOS_FAULT)          ; Target is 6000ms
         
-        Throttle_Multiplier = REDUCED_THROTTLE_MULTIPLIER        ; Reduce throttle to 80% = 102/128
-        
-        temp_Map_Output_1 = Map_Two_Points(FAULT_RAMP_output, 0, TIME_TO_FULL_LOS_FAULT, 100, REDUCED_REGEN_INPUT_CURLIM_PERC)
-        temp_Map_Output_2 = Map_Two_Points(FAULT_RAMP_output, 0, TIME_TO_FULL_LOS_FAULT, 100, REDUCED_DRIVE_INPUT_CURLIM_PERC)
-        
-        Drive_Current_Limit = Map_Two_Points(temp_Map_Output_1, 0, 100, 1638, INIT_DRIVE_OUTPUT_CURLIM)
-        
-        Regen_Current_Limit = Map_Two_Points(temp_Map_Output_1, 0, 100, 1638, INIT_REGEN_OUTPUT_CURLIM)
-        Brake_Current_Limit = Regen_Current_Limit
-        Interlock_Brake_Current_Limit = Regen_Current_Limit
-        
-        RM_Drive_Current_Limit = Drive_Current_Limit
-        RM_Regen_Current_Limit = Regen_Current_Limit
+        set_ramp_target(REGEN_FAULT_RAMP, TIME_TO_FULL_LOS_FAULT)          ; Target is 6000ms
         
     }
     
-    if ( (Regen_Fault = OFF) & (Drive_Fault = OFF) & (Temp_Fault = OFF) & (General_Fault = OFF) & (RM_Regen_Fault = OFF) & (RM_Drive_Fault = OFF) & (RM_Temp_Fault = OFF) & (RM_General_Fault = OFF) & (State_GearChange < 0x60) | (State_GearChange > 0x8D) ) {
+    if ( (Regen_Fault = OFF) & (Drive_Fault = OFF) & (Temp_Fault = OFF) & (General_Fault = OFF) & (RM_Regen_Fault = OFF) & (RM_Drive_Fault = OFF) & (RM_Temp_Fault = OFF) & (RM_General_Fault = OFF) ) {
         ; When there are no faults, set current limits normally
         ; When gear change is busy, don't set limits normally
         
-        set_ramp_target(FAULT_RAMP, 0)          ; Ramp goes to 0 again
+        set_ramp_target(DRIVE_FAULT_RAMP, 0)          ; Target is 6000ms
+        
+        set_ramp_target(REGEN_FAULT_RAMP, 0)          ; Target is 6000ms
         
         Throttle_Multiplier = 128
         
-        Drive_Current_Limit = INIT_DRIVE_OUTPUT_CURLIM
         
-        Regen_Current_Limit = INIT_REGEN_OUTPUT_CURLIM
-        Brake_Current_Limit = INIT_REGEN_OUTPUT_CURLIM
-        Interlock_Brake_Current_Limit = INIT_REGEN_OUTPUT_CURLIM
-        
-        ; When there are no faults, let the controller determine it's own current limits
-        RM_Drive_Current_Limit = INIT_DRIVE_OUTPUT_CURLIM
-        RM_Regen_Current_Limit = INIT_REGEN_OUTPUT_CURLIM
     }
+    
+    ; Drive limiting
+    temp_Map_Output_1 = Map_Two_Points(DRIVE_FAULT_RAMP_output, 0, TIME_TO_FULL_LOS_FAULT, 100, REDUCED_DRIVE_INPUT_CURLIM_PERC)
+
+    Battery_Drive_Power_Limit = Map_Two_Points(temp_Map_Output_1, 0, 100, BATTERY_DRIVE_POWER_LIMIT_MIN, BATT_DRIVE_PWR_LIM_INIT)
+    RM_Battery_Drive_Power_Limit = Battery_Drive_Power_Limit
+    
+    ; Regen limiting
+    temp_Map_Output_1 = Map_Two_Points(REGEN_FAULT_RAMP_output, 0, TIME_TO_FULL_LOS_FAULT, 100, REDUCED_REGEN_INPUT_CURLIM_PERC)
+    
+    Battery_Regen_Power_Limit = Map_Two_Points(temp_Map_Output_1, 0, 100, BATTERY_REGEN_POWER_LIMIT_MIN, BATT_REGEN_PWR_LIM_INIT)
+    RM_Battery_Regen_Power_Limit = Battery_Regen_Power_Limit
+    
+    ; Control Power Limiting
+    if (Battery_Current > CURRENT_THRESHOLD_POWER_LIMITING) {
+        ; Motors are consuming current
+        Battery_Power_Limit = Battery_Drive_Power_Limit
+        
+    } else if (Battery_Current < -CURRENT_THRESHOLD_POWER_LIMITING) {
+        ; Motors are producing current
+        Battery_Power_Limit = Battery_Regen_Power_Limit
+        
+    } else {
+        Battery_Power_Limit = BATT_DRIVE_PWR_LIM_INIT
+    }
+    
     
     if ( (System_Action <> 0) | (Fault_System <> 0) | (RCV_RM_Fault_System <> 0) | (Fault_System_Battery <> 0) ) {
         ; There is some fault, so send to RDW scherm
@@ -1506,10 +1505,7 @@ DNRStatemachine:
         if ( HPO = 0 ) {
             temp_VCL_Throttle = Map_Two_Points(RCV_Throttle, 0, 255, 0, 32767)     ; Set throttle to position of pedal
             temp_RM_Throttle = temp_VCL_Throttle
-        } else if ( RCV_Throttle >= HIGH_PEDAL_DISABLE_THRESHOLD ) {
-            temp_VCL_Throttle = 0
-            temp_RM_Throttle = temp_VCL_Throttle
-        } else {
+        } else if ( RCV_Throttle < HIGH_PEDAL_DISABLE_THRESHOLD ) {
             ; HPO is still 1 and throttle is below threshold
             HPO = 0
             temp_VCL_Throttle = Map_Two_Points(RCV_Throttle, 0, 255, 0, 32767)     ; Set throttle to position of pedal
@@ -1521,12 +1517,12 @@ DNRStatemachine:
         temp_Map_Output_1 = get_map_output(MAP_GEAR118, Motor_RPM)
         
         ;if ( (Motor_Torque < temp_Map_Output_1) & (GEAR_CHANGE_PROT_DLY_output = 0) ) {
-        if ( (Motor_RPM > 1500) & (GEAR_CHANGE_PROT_DLY_output = 0) ) {
+        ;if ( (Motor_RPM > 1500) & (GEAR_CHANGE_PROT_DLY_output = 0) ) {
             ; 1:6 is more efficient, so switch to 1:6
             
-            State_GearChange = 0x60
+        ;    State_GearChange = 0x60
             
-        }
+        ;}
         
         if (RCV_DNR_Command = DNR_NEUTRAL) {          ; if received DNR command is Neutral
             RCV_DNR_Command = 0     ; Clear Command from RDW scherm
@@ -1554,10 +1550,7 @@ DNRStatemachine:
         if ( HPO = 0 ) {
             temp_VCL_Throttle = Map_Two_Points(RCV_Throttle, 0, 255, 0, 32767)     ; Set throttle to position of pedal
             temp_RM_Throttle = temp_VCL_Throttle
-        } else if ( RCV_Throttle >= HIGH_PEDAL_DISABLE_THRESHOLD ) {
-            temp_VCL_Throttle = 0
-            temp_RM_Throttle = temp_VCL_Throttle
-        } else {
+        } else if ( RCV_Throttle < HIGH_PEDAL_DISABLE_THRESHOLD ) {
             ; HPO is still 1 and throttle is below threshold
             HPO = 0
             temp_VCL_Throttle = Map_Two_Points(RCV_Throttle, 0, 255, 0, 32767)     ; Set throttle to position of pedal
@@ -1568,7 +1561,7 @@ DNRStatemachine:
         temp_Map_Output_1 = get_map_output(MAP_GEAR16, Motor_RPM)
         
         ;if ( (Motor_Torque > temp_Map_Output_1) & (GEAR_CHANGE_PROT_DLY_output = 0) ) {
-        if ( (Motor_RPM < 1400) & (GEAR_CHANGE_PROT_DLY_output = 0) ) {
+        if ( (Motor_RPM < 2100) & (GEAR_CHANGE_PROT_DLY_output = 0) ) {
             ; 1:18 is more efficient, so switch to 1:18
             
             State_GearChange = 0x80
@@ -1598,10 +1591,8 @@ DNRStatemachine:
             temp_Map_Output_1 = Map_Two_Points(RCV_Throttle, 0, 255, 0, -32767)
             temp_VCL_Throttle = get_muldiv(MTD1, temp_Map_Output_1, REVERSE_THROTTLE_MULTIPLIER, 128)     ; Set throttle to position of pedal
             temp_RM_Throttle = temp_VCL_Throttle
-        } else if ( RCV_Throttle >= HIGH_PEDAL_DISABLE_THRESHOLD ) {
-            temp_VCL_Throttle = 0
-            temp_RM_Throttle = temp_VCL_Throttle
-        } else {
+        } else if ( RCV_Throttle < HIGH_PEDAL_DISABLE_THRESHOLD ) {
+            
             ; HPO is still 1 and throttle is below threshold
             HPO = 0
             temp_Map_Output_1 = Map_Two_Points(RCV_Throttle, 0, 255, 0, -32767)
@@ -1701,6 +1692,12 @@ DNRStatemachine:
     } else {
         L_Steering_Multiplier = 255
         R_Steering_Multiplier = 255
+    }
+    
+    if (HPO = 1) {
+        ; High pedal at DNR Change
+        temp_VCL_Throttle = 0
+        temp_RM_Throttle = temp_VCL_Throttle
     }
     
     VCL_Throttle = get_muldiv(MTD1, temp_VCL_Throttle, L_Steering_Multiplier, 255)

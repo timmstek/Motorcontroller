@@ -134,8 +134,10 @@ Motor_Rads                              alias       user23          ; Speed of a
 ; Temperature and current protection
 Motor_Temperature_Display               alias       user30          ; Temperature of Motor 0-255 C
 Controller_Temperature_Display          alias       user31          ; Temperature of Controller 0-255 C
-RCV_Drive_Current_Limit                 alias       user32          ; Current limits received from master
-RCV_Regen_Current_Limit                 alias       user33          ; Current limits received from master
+RCV_Battery_Drive_Power_Limit           alias       user32          ; Current limits received from master
+RCV_Battery_Regen_Power_Limit           alias       user33          ; Current limits received from master
+BATT_DRIVE_PWR_LIM_INIT                 alias       user34
+CURRENT_THRESHOLD_POWER_LIMITING        alias       user35
 
 ; DNR, Throttle and Brake
 RCV_DNR_Command                         alias       user40          ; Received DNR state from master
@@ -373,10 +375,10 @@ startup_CAN_System:
         @RCV_Throttle_Compensated,			    ; Torque for right motorcontroller
         @RCV_Throttle_Compensated + USEHB, 
         @RCV_State_GearChange,			        ; Command to change gear
-        @RCV_Drive_Current_Limit,			    ; Set max speed
-        @RCV_Drive_Current_Limit + USEHB,
-        @RCV_Regen_Current_Limit,				; Set Regen limit
-        @RCV_Regen_Current_Limit + USEHB, 
+        @RCV_Battery_Drive_Power_Limit,			    ; Set max speed
+        @RCV_Battery_Drive_Power_Limit + USEHB,
+        @RCV_Battery_Regen_Power_Limit,				; Set Regen limit
+        @RCV_Battery_Regen_Power_Limit + USEHB, 
         @RCV_DNR_Command)
 
 
@@ -405,15 +407,15 @@ startup_CAN_System:
             
     Setup_Mailbox(MAILBOX_SM_MOSI3, 0, 0, MAILBOX_SM_MOSI3_addr, C_EVENT, C_RCV, 0, 0)
 
-    Setup_Mailbox_Data(MAILBOX_SM_MOSI3, 6, 		
+    Setup_Mailbox_Data(MAILBOX_SM_MOSI3, 4, 		
         @RCV_Throttle_Compensated,			
         @RCV_Throttle_Compensated + USEHB,
-        @Drive_Current_Limit,
-        @Drive_Current_Limit + USEHB,
         @RCV_State_GearChange,							
         @reset_controller_remote,
 		0,
-		0)
+		0,
+        0,
+        0)
         
             
             ; MAILBOX 5
@@ -506,15 +508,15 @@ startup_CAN_System:
    			; Partner:		Master controller
 
     Setup_Mailbox(MAILBOX_MOSI_INIT_PARAM2, 0, 0, MAILBOX_MOSI_INIT_PARAM2_addr, C_EVENT, C_RCV, 0, 0)
-    Setup_Mailbox_Data(MAILBOX_MOSI_INIT_PARAM2, 4, 		
+    Setup_Mailbox_Data(MAILBOX_MOSI_INIT_PARAM2, 8, 		
         @Brake_Release_Rate_TrqM,
         @Brake_Release_Rate_TrqM + USEHB,				
         @Neutral_Braking_TrqM, 
         @Neutral_Braking_TrqM + USEHB,
-        0,
-        0,
-        0,
-        0)
+        @BATT_DRIVE_PWR_LIM_INIT,
+        @BATT_DRIVE_PWR_LIM_INIT + USEHB,
+        @CURRENT_THRESHOLD_POWER_LIMITING,
+        @CURRENT_THRESHOLD_POWER_LIMITING + USEHB)
 
 
 
@@ -629,13 +631,18 @@ faultHandling:
         RCV_ACK_System_Action = 0
     }
     
-    ; Set current limits to the correct values
-    Drive_Current_Limit = RCV_Drive_Current_Limit
-    Regen_Current_Limit = RCV_Regen_Current_Limit
-    
-    ; Set Regen limits correct
-    Brake_Current_Limit = Regen_Current_Limit
-    Interlock_Brake_Current_Limit = Regen_Current_Limit
+    ; Control Power Limiting
+    if (Battery_Current > CURRENT_THRESHOLD_POWER_LIMITING) {
+        ; Motors are consuming current
+        Battery_Power_Limit = RCV_Battery_Drive_Power_Limit
+        
+    } else if (Battery_Current < -CURRENT_THRESHOLD_POWER_LIMITING) {
+        ; Motors are producing current
+        Battery_Power_Limit = RCV_Battery_Regen_Power_Limit
+        
+    } else {
+        Battery_Power_Limit = BATT_DRIVE_PWR_LIM_INIT
+    }
     
     return
 
