@@ -132,7 +132,7 @@ GEAR_CHANGE_AFTER_DELAY         constant    500
 PROTECTION_DELAY_GRCHANGE       constant    5000    ; Allowed to only change gear once per second, in ms
 THROTTLE_MULTIP_REDUCE          constant    26      ; 26/128 = 0.2 multiplier for reducing throttle during gear change
 THROTTLE_MULTIP_INCREASE        constant    128     ; 230/128 = 1.8 multiplier to compensate for reduced throttle
-MAX_SPEED_CHANGE_DNR            constant    80      ; in km/h, with 1 decimal
+MAX_SPEED_CHANGE_DNR            constant    50      ; in km/h, with 1 decimal
 
 IDLE_RPM_THRESHOLD              constant    5       ; If RPM is lower than this value, interlock is turned on after some time
 IDLE_THROTTLE_THRESHOLD         constant    2       ; If throttle signal is below this value, interlock is turned on after some time
@@ -285,7 +285,7 @@ Motor_Rads                        alias      user15     ; Rotor speed [rad/s]
 R_Steering_Multiplier             alias      user20     ; Mulitplier for throttle signal to right controller
 L_Steering_Multiplier             alias      user21     ; Mulitplier for throttle signal to Left controller
 MAX_STEER_COMPENSATION            alias      user22     ; Multiplier at maximum steering angle
-Steerangle_VCL                        alias      user23     ; Steerangle_VCL
+RCV_Steerangle                        alias      user23     ; RCV_Steerangle
 
 
 ; Current limits
@@ -300,7 +300,7 @@ RM_Throttle_Compensated           alias      user40           			; Torque for ri
 DNR_Command                       alias      user41           			; DNR command to Right controller
 RCV_DNR_Command                   alias      user42           			; DNR command Received from switch
 RCV_Throttle                      alias      user43           			; Throttle pedal state
-Brake_RCV                         alias      user44           			; Brake pedal pushed
+RCV_Brake                         alias      user44           			; Brake pedal pushed
 fault_CNT_GearChange              alias      user45                     ; Counts number of times gear change has fault    
 
 
@@ -564,10 +564,10 @@ Battery_Regen_Power_Limit = BATT_REGEN_PWR_LIM_INIT
 Battery_Power_Limit = BATT_DRIVE_PWR_LIM_INIT
 
 ; For testing purposes
-Steerangle_VCL = 125
-RCV_Key_Switch = 1
-RCV_Throttle = 0
-RCV_DNR_Command = 1
+RCV_Steerangle = 125
+;RCV_Key_Switch = 1
+;RCV_Throttle = 0
+;RCV_DNR_Command = 1
 
 
 
@@ -600,14 +600,14 @@ Mainloop:
     
     call DNRStatemachine
     
-    ;if (Low_Prio_Loop_DLY_output = 0) {
+    if (Low_Prio_Loop_DLY_output = 0) {
         
         call controlFans
     
         call calculateEfficiency
         
-    ;    setup_delay(Low_Prio_Loop_DLY, LOW_PRIO_LOOP_RATE)
-    ;}
+        setup_delay(Low_Prio_Loop_DLY, LOW_PRIO_LOOP_RATE)
+    }
     
     
     goto mainLoop 
@@ -693,7 +693,7 @@ startupCANSystem:
             
     Setup_Mailbox(MAILBOX_SM_MOSI2, 0, 0, MAILBOX_SM_MOSI2_addr, C_CYCLIC, C_XMT, 0, 0)
     Setup_Mailbox_Data(MAILBOX_SM_MOSI2, 2,
-        @Brake_RCV,
+        @RCV_Brake,
         @Interlock_XMT,
         0,
         0,
@@ -748,7 +748,7 @@ startupCANSystem:
     Setup_Mailbox_Data(MAILBOX_RDW_RCV, 3, 			; DNR switch state
         @RCV_DNR_Command,
 		@RCV_Key_Switch,
-		@Steerangle_VCL,					; Steerangle_VCL
+		@RCV_Steerangle,					; RCV_Steerangle
         0, 
 		0,
 		0,
@@ -764,17 +764,17 @@ startupCANSystem:
     Setup_Mailbox(MAILBOX_RDW_XMT, 0, 0, MAILBOX_RDW_XMT_addr, C_CYCLIC, C_XMT, 0, 0)
     Setup_Mailbox_Data(MAILBOX_RDW_XMT, 8,
         @Vehicle_Speed,				; Speed of the wheels
+        @Vehicle_Speed + USEHB,
         @Temp_Motor_Display,		; Temperature of Motors
         @Temp_Contr_Display,		; Temperature of Controllers
         @state_DNR,			    ; Temperature errors from Batteries
         @Temp_Index_Display,		; Index which motor, controller and battery is the hottest (M-C)
         @LM_Efficiency,            ; Regen, Eco or power region
-		@State_Of_Charge,
-        0)
+		@State_Of_Charge)
 
 
    			; MAILBOX 13
-   			; Purpose:		receive information: Steerangle_VCL, throttle, brake
+   			; Purpose:		receive information: RCV_Steerangle, throttle, brake
    			; Type:			PDO3
    			; Partner:		Interieur Verlichting?
 
@@ -797,7 +797,7 @@ startupCANSystem:
 
     Setup_Mailbox(MAILBOX_BRK_RCV, 0, 0, MAILBOX_BRK_RCV_addr, C_EVENT, C_RCV, 0, 0)
     Setup_Mailbox_Data(MAILBOX_BRK_RCV, 1, 		; Brake pedal state input
-        @Brake_RCV,
+        @RCV_Brake,
 		0,
 		0,
 		0,
@@ -1419,16 +1419,6 @@ DNRStatemachine:
         }
     }
     
-    if (Brake_RCV = 1) {
-        VCL_Brake = FULL_BRAKE   ; Map_Two_Points(100, 0, 100, 0, 32767)
-        ;RCV_Throttle = 0
-    } else {
-        VCL_Brake = 0
-    }
-    
-    
-    
-    
     
     
     if ( (State_GearChange >= 0x60) & (State_GearChange < 0x6D) ) {
@@ -1517,12 +1507,12 @@ DNRStatemachine:
         temp_Map_Output_1 = get_map_output(MAP_GEAR118, Motor_RPM)
         
         ;if ( (Motor_Torque < temp_Map_Output_1) & (GEAR_CHANGE_PROT_DLY_output = 0) ) {
-        ;if ( (Motor_RPM > 1500) & (GEAR_CHANGE_PROT_DLY_output = 0) ) {
+        if ( (Motor_RPM > 1500) & (GEAR_CHANGE_PROT_DLY_output = 0) ) {
             ; 1:6 is more efficient, so switch to 1:6
             
-        ;    State_GearChange = 0x60
+            State_GearChange = 0x60
             
-        ;}
+        }
         
         if (RCV_DNR_Command = DNR_NEUTRAL) {          ; if received DNR command is Neutral
             RCV_DNR_Command = 0     ; Clear Command from RDW scherm
@@ -1561,7 +1551,7 @@ DNRStatemachine:
         temp_Map_Output_1 = get_map_output(MAP_GEAR16, Motor_RPM)
         
         ;if ( (Motor_Torque > temp_Map_Output_1) & (GEAR_CHANGE_PROT_DLY_output = 0) ) {
-        if ( (Motor_RPM < 2100) & (GEAR_CHANGE_PROT_DLY_output = 0) ) {
+        if ( (Motor_RPM < 1400) & (GEAR_CHANGE_PROT_DLY_output = 0) ) {
             ; 1:18 is more efficient, so switch to 1:18
             
             State_GearChange = 0x80
@@ -1679,14 +1669,14 @@ DNRStatemachine:
     ; Calculate Steeringangle factor
     ; reduce throttle on inner wheel, independent of speed
     
-    if (Steerangle_VCL > (125+STEER_ANGLE_NO_EFFECT)) {
+    if (RCV_Steerangle > (125+STEER_ANGLE_NO_EFFECT)) {
         ; Steering to right
-        R_Steering_Multiplier = get_map_output(Angle2Multiplier_MAP, Steerangle_VCL)
+        R_Steering_Multiplier = get_map_output(Angle2Multiplier_MAP, RCV_Steerangle)
         L_Steering_Multiplier = 255
         
-    } else if (Steerangle_VCL < (125-STEER_ANGLE_NO_EFFECT)) {
+    } else if (RCV_Steerangle < (125-STEER_ANGLE_NO_EFFECT)) {
         ; Steering to left
-        L_Steering_Multiplier = get_map_output(Angle2Multiplier_MAP, Steerangle_VCL)
+        L_Steering_Multiplier = get_map_output(Angle2Multiplier_MAP, RCV_Steerangle)
         R_Steering_Multiplier = 255
         
     } else {
@@ -1698,6 +1688,14 @@ DNRStatemachine:
         ; High pedal at DNR Change
         temp_VCL_Throttle = 0
         temp_RM_Throttle = temp_VCL_Throttle
+    }
+    
+    if (RCV_Brake = 1) {
+        VCL_Brake = FULL_BRAKE
+        temp_VCL_Throttle = 0
+        temp_RM_Throttle = temp_VCL_Throttle
+    } else {
+        VCL_Brake = 0
     }
     
     VCL_Throttle = get_muldiv(MTD1, temp_VCL_Throttle, L_Steering_Multiplier, 255)
