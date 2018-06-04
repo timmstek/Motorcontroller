@@ -120,14 +120,17 @@ REDUCED_DRIVE_INPUT_CURLIM_PERC constant    60      ; Drive current limit is 60%
 REDUCED_REGEN_INPUT_CURLIM_PERC constant    15      ; Regen current limit is 15%, when fault is detected
 REDUCED_THROTTLE_MULTIPLIER     constant    75      ; 60% of 128 = 75
 REVERSE_THROTTLE_MULTIPLIER     constant    128     ; 90% of 128 = 115
-TIME_TO_FULL_LOS_FAULT          constant    6000    ; Time it takes to go to full effect of the reduced current limits
+TIME_TO_FULL_LOS_FAULT          constant    10000    ; Time it takes to go to full effect of the reduced current limits
                                                     ; Due to a fault, max 6000 ms
 
 ; DNR, Gear change and steering settings
-PROTECTION_DELAY_GRCHANGE       constant    1000    ; Allowed to only change gear once per second, in ms
+GEAR_CHANGE_BEFORE_DELAY        constant    1000
+GEAR_CHANGE_AFTER_DELAY         constant    500
+PROTECTION_DELAY_GRCHANGE       constant    10000    ; Allowed to only change gear once per second, in ms
 THROTTLE_MULTIP_REDUCE          constant    26      ; 26/128 = 0.2 multiplier for reducing throttle during gear change
-THROTTLE_MULTIP_INCREASE        constant    230     ; 230/128 = 1.8 multiplier to compensate for reduced throttle
+THROTTLE_MULTIP_INCREASE        constant    128     ; 230/128 = 1.8 multiplier to compensate for reduced throttle
 MAX_SPEED_CHANGE_DNR            constant    80      ; in km/h, with 1 decimal
+
 IDLE_RPM_THRESHOLD              constant    5       ; If RPM is lower than this value, interlock is turned on after some time
 IDLE_THROTTLE_THRESHOLD         constant    2       ; If throttle signal is below this value, interlock is turned on after some time
 TIME_TO_START_STOP              constant    10000   ; If car is idle for 10s, turn off interlock
@@ -170,7 +173,7 @@ Key_Switch_Hard_Reset_Complete		alias P_User1		;Can be saved to non-volatile mem
 
 create reset_controller_remote variable
 
-create  RCV_State_GearChange        variable            ; Smesh enabled, received from Right Motorcontroller
+create RCV_State_GearChange variable            ; Smesh enabled, received from Right Motorcontroller
 
 create RCV_System_Action variable
 
@@ -194,6 +197,7 @@ create  temp_Map_Output_2   variable
 create  temp_Calculation    variable
 create  temp_Calculation_2    variable
 create  temp_VCL_Throttle   variable
+create  temp_RM_Throttle    variable
 
 create temp_Drive_Current_Limit variable
 create temp_Regen_Current_Limit variable
@@ -486,6 +490,8 @@ Start_Stop_DLY                    alias     DLY6
 Start_Stop_DLY_output             alias     DLY6_output
 Low_Prio_Loop_DLY                 alias     DLY7
 Low_Prio_Loop_DLY_output          alias     DLY7_output
+Gear_Change_DLY                   alias     DLY8
+Gear_Change_DLY_output            alias     DLY8_output
 
 FAULT_TIMER                       alias      TMR1
 FAULT_TIMER_ms_output             alias      TMR1_ms_output
@@ -537,8 +543,7 @@ Battery_Power_Limit = Battery_Power_Limit_Init
 Steerangle_VCL = 125
 RCV_Key_Switch = 1
 RCV_Throttle = 0
-RCV_DNR_Command = 0
-RCV_DNR_Command = 0
+RCV_DNR_Command = 1
 
 
 
@@ -1405,9 +1410,7 @@ DNRStatemachine:
     
     if ( (State_GearChange >= 0x60) & (State_GearChange < 0x6D) ) {
         
-        ;; Changing gear to 1:6
-        call setSmeshTo16
-        
+        call setSmeshTo16Simple
         
         if (State_GearChange = 0x6D) {
             ; Gear change is finished
@@ -1417,51 +1420,42 @@ DNRStatemachine:
             if (state_DNR = DRIVE118) {
                 state_DNR= DRIVE16
             }
-            
         } else if (State_GearChange = 0xFF) {
             fault_CNT_GearChange = fault_CNT_GearChange + 1
             State_GearChange = 0x60
             
-            exit
-        } else {
-            exit
         }
         
         
     } else if ( (State_GearChange >= 0x80) & (State_GearChange < 0x8D) ) {
         ;; Changing gear to 1:18
-        call setSmeshTo118
         
-        setup_delay(DLY20, 6)
-        while (DLY20_output <> 0) {}
+        call setSmeshTo118Simple
         
         if (State_GearChange = 0x8D) {
             ; Gear change is finished
             fault_CNT_GearChange = 0
-            State_GearChange = 0x01
+            
             
             if (state_DNR = DRIVE16) {
+                State_GearChange = 0x01
                 state_DNR = DRIVE118
             } else if (state_DNR = PRE_DRIVE) {
                 ; Just go back to the main state
             } else if (state_DNR = PRE_REVERSE) {
                 ; Just go back to the main state
             }
-            
         } else if (State_GearChange = 0xFF) {
             fault_CNT_GearChange = fault_CNT_GearChange + 1
             State_GearChange = 0x80
             
-            exit
-        } else {
-            exit
         }
         
-
-    } 
-    
-    if (state_DNR = NEUTRAL) {
+    } else if (state_DNR = NEUTRAL) {
+        State_GearChange = 0x01
+        
         temp_VCL_Throttle = 0
+        temp_RM_Throttle = temp_VCL_Throttle
         
         if (RCV_DNR_Command = DNR_DRIVE) {          ; if received DNR command is Drive
             
@@ -1478,6 +1472,8 @@ DNRStatemachine:
         
     
     } else if (state_DNR = DRIVE118) {      ; In 1:18 gear
+    
+        State_GearChange = 0x01
         
         ; Check efficiency
         ; check with map
@@ -1485,19 +1481,23 @@ DNRStatemachine:
         
         if ( HPO = 0 ) {
             temp_VCL_Throttle = Map_Two_Points(RCV_Throttle, 0, 255, 0, 32767)     ; Set throttle to position of pedal
+            temp_RM_Throttle = temp_VCL_Throttle
         } else if ( RCV_Throttle >= HIGH_PEDAL_DISABLE_THRESHOLD ) {
             temp_VCL_Throttle = 0
+            temp_RM_Throttle = temp_VCL_Throttle
         } else {
             ; HPO is still 1 and throttle is below threshold
             HPO = 0
             temp_VCL_Throttle = Map_Two_Points(RCV_Throttle, 0, 255, 0, 32767)     ; Set throttle to position of pedal
+            temp_RM_Throttle = temp_VCL_Throttle
         }
         
         
         ; Check Efficiency
         temp_Map_Output_1 = get_map_output(MAP_GEAR118, Motor_RPM)
         
-        if ( (Motor_Torque < temp_Map_Output_1) & (GEAR_CHANGE_PROT_DLY = 0) ) {
+        ;if ( (Motor_Torque < temp_Map_Output_1) & (GEAR_CHANGE_PROT_DLY_output = 0) ) {
+        if ( (Motor_RPM > 1500) & (GEAR_CHANGE_PROT_DLY_output = 0) ) {
             ; 1:6 is more efficient, so switch to 1:6
             
             State_GearChange = 0x60
@@ -1521,24 +1521,30 @@ DNRStatemachine:
         
     } else if (state_DNR = DRIVE16) {
         
+        State_GearChange = 0x01
+        
         ; Check efficiency
         ; check with map
         ; if efficency is wrong switch gear to 118
         
         if ( HPO = 0 ) {
             temp_VCL_Throttle = Map_Two_Points(RCV_Throttle, 0, 255, 0, 32767)     ; Set throttle to position of pedal
+            temp_RM_Throttle = temp_VCL_Throttle
         } else if ( RCV_Throttle >= HIGH_PEDAL_DISABLE_THRESHOLD ) {
             temp_VCL_Throttle = 0
+            temp_RM_Throttle = temp_VCL_Throttle
         } else {
             ; HPO is still 1 and throttle is below threshold
             HPO = 0
             temp_VCL_Throttle = Map_Two_Points(RCV_Throttle, 0, 255, 0, 32767)     ; Set throttle to position of pedal
+            temp_RM_Throttle = temp_VCL_Throttle
         }
         
         ; Check Efficiency
         temp_Map_Output_1 = get_map_output(MAP_GEAR16, Motor_RPM)
         
-        if ( (Motor_Torque > temp_Map_Output_1) & (GEAR_CHANGE_PROT_DLY = 0) ) {
+        ;if ( (Motor_Torque > temp_Map_Output_1) & (GEAR_CHANGE_PROT_DLY_output = 0) ) {
+        if ( (Motor_RPM < 1400) & (GEAR_CHANGE_PROT_DLY_output = 0) ) {
             ; 1:18 is more efficient, so switch to 1:18
             
             State_GearChange = 0x80
@@ -1562,16 +1568,21 @@ DNRStatemachine:
         
     } else if (state_DNR = REVERSE) {
         
+        State_GearChange = 0x01
+        
         if ( HPO = 0 ) {
             temp_Map_Output_1 = Map_Two_Points(RCV_Throttle, 0, 255, 0, -32767)
             temp_VCL_Throttle = get_muldiv(MTD1, temp_Map_Output_1, REVERSE_THROTTLE_MULTIPLIER, 128)     ; Set throttle to position of pedal
+            temp_RM_Throttle = temp_VCL_Throttle
         } else if ( RCV_Throttle >= HIGH_PEDAL_DISABLE_THRESHOLD ) {
             temp_VCL_Throttle = 0
+            temp_RM_Throttle = temp_VCL_Throttle
         } else {
             ; HPO is still 1 and throttle is below threshold
             HPO = 0
             temp_Map_Output_1 = Map_Two_Points(RCV_Throttle, 0, 255, 0, -32767)
             temp_VCL_Throttle = get_muldiv(MTD1, temp_Map_Output_1, REVERSE_THROTTLE_MULTIPLIER, 128)     ; Set throttle to position of pedal
+            temp_RM_Throttle = temp_VCL_Throttle
         }
         
         if (RCV_DNR_Command = DNR_NEUTRAL) {          ; if received DNR command is Neutral
@@ -1596,8 +1607,6 @@ DNRStatemachine:
             state_DNR = NEUTRAL
         } else {
             ; set gear to 1:18 and go to drive state
-            State_GearChange = 0x80
-            call setSmeshTo118
             
             if (State_GearChange = 0x8D) {
                 ; When gear change is not aborted, change state
@@ -1606,6 +1615,9 @@ DNRStatemachine:
                 
                 state_DNR= DRIVE118
                 State_GearChange = 0x01
+            } else {
+                State_GearChange = 0x80
+                call setSmeshTo118Simple
             }
 
         }
@@ -1622,8 +1634,6 @@ DNRStatemachine:
             
         } else {
             ; Set gear to 1:18 and go to reverse state
-            State_GearChange = 0x80
-            call setSmeshTo118
             
             if (State_GearChange = 0x8D) {
                 ; When gear change is not aborted, change state
@@ -1632,6 +1642,9 @@ DNRStatemachine:
                 
                 state_DNR= REVERSE
                 State_GearChange = 0x01
+            } else {
+                State_GearChange = 0x80
+                call setSmeshTo118Simple
             }
         }
         
@@ -1667,7 +1680,7 @@ DNRStatemachine:
     }
     
     VCL_Throttle = get_muldiv(MTD1, temp_VCL_Throttle, L_Steering_Multiplier, 255)
-    temp_Calculation = get_muldiv(MTD2, temp_VCL_Throttle, R_Steering_Multiplier, 255)
+    temp_Calculation = get_muldiv(MTD2, temp_RM_Throttle, R_Steering_Multiplier, 255)
     RM_Throttle_Compensated = get_muldiv(MTD3, temp_Calculation, Throttle_Multiplier, 128)
     
     
@@ -1686,150 +1699,116 @@ DNRStatemachine:
     
     
     
-setSmeshTo16:
+setSmeshTo16Simple:
 
     if ( (State_GearChange = 0x60) & (SmeshLeftPin_output = OFF) & (SmeshRightPin_output = OFF) ) {
-        ; Smesh is already in 1:6 mode (16 OFF(clear); 118 ON(set))
+        ; Smesh is already in 1:18 mode (16 OFF(clear); 118 ON(set))
         ; So directly go to the end of the functions
-        
-        ;Put_Spy_Message("16G",0,"",PSM_TEXT_ONLY)
-        
-        ;Setup_Delay(DLY16, 500)
-        ;while (DLY16_output <> 0) {}			; Wait 500ms before start
-        
         State_GearChange = 0x6B
         
         send_mailbox(MAILBOX_SM_MOSI3)
         Setup_Delay(Smesh_DLY, CAN_DELAY_FOR_ACK)
     }
-
     
-    ;;;;; 1. Reduce left throttle
-    
-    if (State_GearChange = 0x60) {
-        temp_Map_Output_1 = Map_Two_Points(RCV_Throttle, 0, 255, 0, 32767)
-        VCL_Throttle = get_muldiv(MTD1, THROTTLE_MULTIP_REDUCE, temp_Map_Output_1, 128)
+    if ((State_GearChange = 0x60)) {
+        temp_Map_Output_1 = get_muldiv(MTD1, RCV_Throttle, THROTTLE_MULTIP_REDUCE, 128)
+        temp_VCL_Throttle = Map_Two_Points(temp_Map_Output_1, 0, 255, 0, 32767)
+        temp_RM_Throttle = Map_Two_Points(RCV_Throttle, 0, 255, 0, 32767)
+        
         State_GearChange = 0x61
         
-        send_mailbox(MAILBOX_SM_MOSI3)
-        Setup_Delay(Smesh_DLY, CAN_DELAY_FOR_ACK)
+        setup_delay(Gear_Change_DLY, GEAR_CHANGE_BEFORE_DELAY)
     }
-    
-    
-    ;;;;; 2. Receive ACK: Procedure has started
     
     if (State_GearChange = 0x61) {
         
-        if (RCV_State_GearChange = 0x62) {
-            ; Right controller has changed throttle
+        temp_Map_Output_1 = get_muldiv(MTD1, RCV_Throttle, THROTTLE_MULTIP_REDUCE, 128)
+        temp_VCL_Throttle = Map_Two_Points(temp_Map_Output_1, 0, 255, 0, 32767)
+        temp_RM_Throttle = Map_Two_Points(RCV_Throttle, 0, 255, 0, 32767)
+        
+        if (Gear_Change_DLY_output = 0) {
             State_GearChange = 0x62
-        } else if (Smesh_DLY_output = 0) {
-            ; It takes too much time to change gear
-            State_GearChange = 0xFF
-            
         }
         
     }
-        
-        
-    ;;;;; 3. multiply throttle of right controller with 2
+    
     if (State_GearChange = 0x62) {
-        temp_Map_Output_1 = Map_Two_Points(RCV_Throttle, 0, 255, 0, 32767)
-        RM_Throttle_Compensated = get_muldiv(MTD1, THROTTLE_MULTIP_INCREASE, temp_Map_Output_1, 128)
-        ;RM_Drive_Current_Limit = get_muldiv(MTD1, THROTTLE_MULTIP_INCREASE, temp_Drive_Current_Limit, 128)
-        State_GearChange = 0x63
+        ; 16 OFF(clear); 118 ON(set) ; & (Gear_Change_DLY_output = 0) 
+        clear_DigOut(SmeshLeftPin)                          ; Change gear
         
-        send_mailbox(MAILBOX_SM_MOSI3)
-        Setup_Delay(Smesh_DLY, CAN_DELAY_FOR_ACK)
+        setup_delay(Gear_Change_DLY, GEAR_CHANGE_AFTER_DELAY)
+        
+        State_GearChange = 0x63
     }
-    
-    
-    ;;;;; 4. receive ACK from controller: throttle is increased
     
     if (State_GearChange = 0x63) {
         
-        if (RCV_State_GearChange = 0x64) {
-            ; Right controller has changed throttle
+        temp_Map_Output_1 = get_muldiv(MTD1, RCV_Throttle, THROTTLE_MULTIP_REDUCE, 128)
+        temp_VCL_Throttle = Map_Two_Points(temp_Map_Output_1, 0, 255, 0, 32767)
+        temp_RM_Throttle = Map_Two_Points(RCV_Throttle, 0, 255, 0, 32767)
+        
+        if (Gear_Change_DLY_output = 0) {
             State_GearChange = 0x64
-        } else if (Smesh_DLY_output = 0) {
-            ; It takes too much time to change gear
-            State_GearChange = 0xFF
-            
         }
         
     }
     
     
-    ;;;;; 5. Switch left gear to 1:6
     
-    if (State_GearChange = 0x64) {
-        ; 16 OFF(clear); 118 ON(set)
-        clear_DigOut(SmeshLeftPin)                          ; Change gear
+    
+    if ((State_GearChange = 0x64)) {
+        temp_Map_Output_1 = get_muldiv(MTD1, RCV_Throttle, THROTTLE_MULTIP_REDUCE, 128)
+        temp_RM_Throttle = Map_Two_Points(temp_Map_Output_1, 0, 255, 0, 32767)
+        temp_VCL_Throttle = Map_Two_Points(RCV_Throttle, 0, 255, 0, 32767)
+        
         State_GearChange = 0x65
         
-        
-    ;;;;; 6. Reduce throttle right controller
-        temp_Map_Output_1 = Map_Two_Points(RCV_Throttle, 0, 255, 0, 32767)
-        RM_Throttle_Compensated = get_muldiv(MTD1, THROTTLE_MULTIP_REDUCE, temp_Map_Output_1, 128)
-        ;RM_Drive_Current_Limit = temp_Drive_Current_Limit
-        State_GearChange = 0x66
-        
-        send_mailbox(MAILBOX_SM_MOSI3)
-        Setup_Delay(Smesh_DLY, CAN_DELAY_FOR_ACK)
+        setup_delay(Gear_Change_DLY, GEAR_CHANGE_BEFORE_DELAY)
     }
     
-    
-    ;;;;; 7. receive ACK from controller: throttle is reduced
+    if (State_GearChange = 0x65) {
+        temp_Map_Output_1 = get_muldiv(MTD1, RCV_Throttle, THROTTLE_MULTIP_REDUCE, 128)
+        temp_RM_Throttle = Map_Two_Points(temp_Map_Output_1, 0, 255, 0, 32767)
+        temp_VCL_Throttle = Map_Two_Points(RCV_Throttle, 0, 255, 0, 32767)
+        
+        if (Gear_Change_DLY_output = 0) {
+            State_GearChange = 0x66
+        }
+        
+    }
     
     if (State_GearChange = 0x66) {
-        
-        if (RCV_State_GearChange = 0x67) {
-            ; Right controller has changed throttle
-            State_GearChange = 0x67
-        } else if (Smesh_DLY_output = 0) {
-            ; It takes too much time to change gear
-            State_GearChange = 0xFF
-            
-        }
-    }
-    
-    ;;;;; 8. Increase left throttle
-    if (State_GearChange = 0x67) {
-        temp_Map_Output_1 = Map_Two_Points(RCV_Throttle, 0, 255, 0, 32767)
-        VCL_Throttle = get_muldiv(MTD1, THROTTLE_MULTIP_INCREASE, temp_Map_Output_1, 128)
-        ;Drive_Current_Limit = get_muldiv(MTD1, THROTTLE_MULTIP_INCREASE, temp_Drive_Current_Limit, 128)
-        State_GearChange = 0x68
-        
-        
-    ;;;;; 9. Change right gear to 1:6
-        ; 16 OFF(clear); 118 ON(set)
+        ; 16 OFF(clear); 118 ON(set) ; & (Gear_Change_DLY_output = 0) 
         clear_DigOut(SmeshRightPin)                          ; Change gear
         
-        State_GearChange = 0x69
+        setup_delay(Gear_Change_DLY, GEAR_CHANGE_AFTER_DELAY)
+        
+        State_GearChange = 0x67
+    }
     
-    
-    ;;;;; 10. Reduce left throttle to normal
-
-        VCL_Throttle = Map_Two_Points(RCV_Throttle, 0, 255, 0, 32767)
-        Drive_Current_Limit = temp_Drive_Current_Limit
-        State_GearChange = 0x6A
+    if (State_GearChange = 0x67) {
+        temp_Map_Output_1 = get_muldiv(MTD1, RCV_Throttle, THROTTLE_MULTIP_REDUCE, 128)
+        temp_RM_Throttle = Map_Two_Points(temp_Map_Output_1, 0, 255, 0, 32767)
+        temp_VCL_Throttle = Map_Two_Points(RCV_Throttle, 0, 255, 0, 32767)
         
+        if (Gear_Change_DLY_output = 0) {
+            State_GearChange = 0x6B
+            
+            send_mailbox(MAILBOX_SM_MOSI3)
+            Setup_Delay(Smesh_DLY, CAN_DELAY_FOR_ACK)
+        }
         
-    ;;;;; 11. Increase throttle right controller to normal
-        
-        RM_Throttle_Compensated = Map_Two_Points(RCV_Throttle, 0, 255, 0, 32767)
-        State_GearChange = 0x6B
-        
-        send_mailbox(MAILBOX_SM_MOSI3)
-        Setup_Delay(Smesh_DLY, CAN_DELAY_FOR_ACK)
     }
     
     
-    ;;;;; 12. Receive ACK: Procedure has finished
+    
+    
     
     if (State_GearChange = 0x6B) {
+        temp_RM_Throttle = Map_Two_Points(RCV_Throttle, 0, 255, 0, 32767)
+        temp_VCL_Throttle = Map_Two_Points(RCV_Throttle, 0, 255, 0, 32767)
         
-        if (RCV_State_GearChange = 0x67) {
+        if ( (RCV_State_GearChange = 0x6C) | (RCV_State_GearChange = 0x6D) ) {
             ; Right controller has changed throttle
             State_GearChange = 0x6C
         } else if (Smesh_DLY_output = 0) {
@@ -1839,217 +1818,123 @@ setSmeshTo16:
         }
     }
         
-        
-    ;;;;; 12. Change is successful, thus speed_to_RPM can be changed
     if (State_GearChange = 0x6C) {
-        ;Put_Spy_Message("16S",0,"",PSM_TEXT_ONLY)
-        
-        ;Setup_Delay(DLY16, 500)
-        ;while (DLY16_output <> 0) {}			; Wait 500ms before start
+        temp_RM_Throttle = Map_Two_Points(RCV_Throttle, 0, 255, 0, 32767)
+        temp_VCL_Throttle = Map_Two_Points(RCV_Throttle, 0, 255, 0, 32767)
         
         Speed_to_RPM = 601          ; (G/d)*5305 ... 6/530*5305 ... One decimal
         
         ; Gear state to complete
         State_GearChange = 0x6D
+        
         send_mailbox(MAILBOX_SM_MOSI3)
         
         Setup_Delay(GEAR_CHANGE_PROT_DLY, PROTECTION_DELAY_GRCHANGE)
     }
     
-    
-    
-    if ( (State_GearChange = 0xFF) | (RCV_State_GearChange = 0xFF) ) {
-        
-        ;Put_Spy_Message("FL_CGR",0,"",PSM_TEXT_ONLY)
-        
-        ;Setup_Delay(DLY16, 500)
-        ;while (DLY16_output <> 0) {}			; Wait 500ms before start
-        
-        clear_DigOut(SmeshLeftPin)                          ; Change gear
-        clear_DigOut(SmeshRightPin)                          ; Change gear
-        State_GearChange = 0x6D
+    return
 
-        ; Abort mission
-        ;RCV_State_GearChange = 0
-        ;State_GearChange = 0xFF
-        ;
-        ;Drive_Current_Limit = temp_Drive_Current_Limit
-        ;RM_Drive_Current_Limit = temp_Drive_Current_Limit
-        ;VCL_Throttle = get_muldiv(MTD1, THROTTLE_MULTIP_REDUCE, RCV_Throttle, 128)
-        ;RM_Throttle_Compensated = RCV_Throttle
-        ;
-        ;send_mailbox(MAILBOX_SM_MOSI3)
-        ;
-        ;Setup_Delay(Smesh_DLY, CAN_DELAY_FOR_ACK*2)
-        ;while ((Smesh_DLY_output <> 0) & (RCV_State_GearChange <> 0xFF)) {}		; Wait until right controller has changed throttle
-       ; 
-        ;if (RCV_State_GearChange = 0xFF) {
-        ;    ; Slave accepts mission abort, reset left throttle
-        ;    VCL_Throttle = RCV_Throttle
-        ;} else {
-        ;    ; Serious CAN problems, turn off throttle
-        ;    RM_Throttle_Compensated = 0
-        ;    VCL_Throttle = 0
-         ;   
-        ;}
-        ;send_mailbox(MAILBOX_SM_MOSI3)
-        
-    }
+setSmeshTo118Simple:
     
-    
-	return
-
-    
-setSmeshTo118:
-    
-    
-	if ( (State_GearChange = 0x80) & (SmeshLeftPin_output = ON) & (SmeshRightPin_output = ON) ) {
+    if ( (State_GearChange = 0x80) & (SmeshLeftPin_output = ON) & (SmeshRightPin_output = ON) ) {
         ; Smesh is already in 1:18 mode (16 OFF(clear); 118 ON(set))
         ; So directly go to the end of the functions
-        test = 5
         State_GearChange = 0x8B
         
         send_mailbox(MAILBOX_SM_MOSI3)
         Setup_Delay(Smesh_DLY, CAN_DELAY_FOR_ACK)
     }
-
     
-    ;;;;; 1. Reduce left throttle
-    
-    if (State_GearChange = 0x80) {
-        temp_Map_Output_1 = Map_Two_Points(RCV_Throttle, 0, 255, 0, 32767)
-        VCL_Throttle = get_muldiv(MTD1, THROTTLE_MULTIP_REDUCE, temp_Map_Output_1, 128)
+    if ((State_GearChange = 0x80)) {
+        temp_Map_Output_1 = get_muldiv(MTD1, RCV_Throttle, THROTTLE_MULTIP_REDUCE, 128)
+        temp_VCL_Throttle = Map_Two_Points(temp_Map_Output_1, 0, 255, 0, 32767)
+        temp_RM_Throttle = Map_Two_Points(RCV_Throttle, 0, 255, 0, 32767)
+        
         State_GearChange = 0x81
         
-        setup_delay(DLY20, 6)
-        while (DLY20_output <> 0) {}
-        
-        send_mailbox(MAILBOX_SM_MOSI3)
-        Setup_Delay(Smesh_DLY, CAN_DELAY_FOR_ACK)
+        setup_delay(Gear_Change_DLY, GEAR_CHANGE_BEFORE_DELAY)
     }
-    
-    
-    ;;;;; 2. Receive ACK: Procedure has started
     
     if (State_GearChange = 0x81) {
         
-        if (RCV_State_GearChange = 0x82) {
-            ; Right controller has changed throttle
+        temp_Map_Output_1 = get_muldiv(MTD1, RCV_Throttle, THROTTLE_MULTIP_REDUCE, 128)
+        temp_VCL_Throttle = Map_Two_Points(temp_Map_Output_1, 0, 255, 0, 32767)
+        temp_RM_Throttle = Map_Two_Points(RCV_Throttle, 0, 255, 0, 32767)
+        
+        if (Gear_Change_DLY_output = 0) {
             State_GearChange = 0x82
-        } else if (Smesh_DLY_output = 0) {
-            ; It takes too much time to change gear
-            State_GearChange = 0xFF
-            
         }
         
     }
-        
-        
-    ;;;;; 3. multiply throttle of right controller with 2
+    
     if (State_GearChange = 0x82) {
-        temp_Map_Output_1 = Map_Two_Points(RCV_Throttle, 0, 255, 0, 32767)
-        RM_Throttle_Compensated = get_muldiv(MTD1, THROTTLE_MULTIP_INCREASE, temp_Map_Output_1, 128)
-        ;RM_Drive_Current_Limit = get_muldiv(MTD1, THROTTLE_MULTIP_INCREASE, temp_Drive_Current_Limit, 128)
+        ; 16 OFF(clear); 118 ON(set) ; & (Gear_Change_DLY_output = 0) 
+        set_DigOut(SmeshLeftPin)                          ; Change gear
+        
+        setup_delay(Gear_Change_DLY, GEAR_CHANGE_AFTER_DELAY)
+        
         State_GearChange = 0x83
-        
-        setup_delay(DLY20, 6)
-        while (DLY20_output <> 0) {}
-        
-        send_mailbox(MAILBOX_SM_MOSI3)
-        Setup_Delay(Smesh_DLY, CAN_DELAY_FOR_ACK)
     }
-    
-    
-    ;;;;; 4. receive ACK from controller: throttle is increased
     
     if (State_GearChange = 0x83) {
         
-        if (RCV_State_GearChange = 0x84) {
-            ; Right controller has changed throttle
+        temp_Map_Output_1 = get_muldiv(MTD1, RCV_Throttle, THROTTLE_MULTIP_REDUCE, 128)
+        temp_VCL_Throttle = Map_Two_Points(temp_Map_Output_1, 0, 255, 0, 32767)
+        temp_RM_Throttle = Map_Two_Points(RCV_Throttle, 0, 255, 0, 32767)
+        
+        if (Gear_Change_DLY_output = 0) {
             State_GearChange = 0x84
-        } else if (Smesh_DLY_output = 0) {
-            ; It takes too much time to change gear
-            State_GearChange = 0xFF
-            
         }
         
     }
     
-    
-    ;;;;; 5. Switch left gear to 1:6
-    
-    if (State_GearChange = 0x84) {
-        ; 16 OFF(clear); 118 ON(set)
-        set_DigOut(SmeshLeftPin)                          ; Change gear
+    if ((State_GearChange = 0x84)) {
+        temp_Map_Output_1 = get_muldiv(MTD1, RCV_Throttle, THROTTLE_MULTIP_REDUCE, 128)
+        temp_RM_Throttle = Map_Two_Points(temp_Map_Output_1, 0, 255, 0, 32767)
+        temp_VCL_Throttle = Map_Two_Points(RCV_Throttle, 0, 255, 0, 32767)
+        
         State_GearChange = 0x85
         
-        
-    ;;;;; 6. Reduce throttle right controller
-        temp_Map_Output_1 = Map_Two_Points(RCV_Throttle, 0, 255, 0, 32767)
-        RM_Throttle_Compensated = get_muldiv(MTD1, THROTTLE_MULTIP_REDUCE, temp_Map_Output_1, 128)
-        ;RM_Drive_Current_Limit = temp_Drive_Current_Limit
-        State_GearChange = 0x86
-        
-        setup_delay(DLY20, 6)
-        while (DLY20_output <> 0) {}
-        
-        send_mailbox(MAILBOX_SM_MOSI3)
-        Setup_Delay(Smesh_DLY, CAN_DELAY_FOR_ACK)
+        setup_delay(Gear_Change_DLY, GEAR_CHANGE_BEFORE_DELAY)
     }
     
-    
-    ;;;;; 7. receive ACK from controller: throttle is reduced
+    if (State_GearChange = 0x85) {
+        temp_Map_Output_1 = get_muldiv(MTD1, RCV_Throttle, THROTTLE_MULTIP_REDUCE, 128)
+        temp_RM_Throttle = Map_Two_Points(temp_Map_Output_1, 0, 255, 0, 32767)
+        temp_VCL_Throttle = Map_Two_Points(RCV_Throttle, 0, 255, 0, 32767)
+        
+        if (Gear_Change_DLY_output = 0) {
+            State_GearChange = 0x86
+        }
+        
+    }
     
     if (State_GearChange = 0x86) {
-        
-        if (RCV_State_GearChange = 0x87) {
-            ; Right controller has changed throttle
-            State_GearChange = 0x87
-        } else if (Smesh_DLY_output = 0) {
-            ; It takes too much time to change gear
-            State_GearChange = 0xFF
-            
-        }
-    }
-    
-    ;;;;; 8. Increase left throttle
-    if (State_GearChange = 0x87) {
-        temp_Map_Output_1 = Map_Two_Points(RCV_Throttle, 0, 255, 0, 32767)
-        VCL_Throttle = get_muldiv(MTD1, THROTTLE_MULTIP_INCREASE, temp_Map_Output_1, 128)
-        ;Drive_Current_Limit = get_muldiv(MTD1, THROTTLE_MULTIP_INCREASE, temp_Drive_Current_Limit, 128)
-        State_GearChange = 0x88
-        
-        
-    ;;;;; 9. Change right gear to 1:6
-        ; 16 OFF(clear); 118 ON(set)
+        ; 16 OFF(clear); 118 ON(set) ; & (Gear_Change_DLY_output = 0) 
         set_DigOut(SmeshRightPin)                          ; Change gear
         
-        State_GearChange = 0x89
-    
-    
-    ;;;;; 10. Reduce left throttle to normal
-
-        VCL_Throttle = Map_Two_Points(RCV_Throttle, 0, 255, 0, 32767)
-        Drive_Current_Limit = temp_Drive_Current_Limit
-        State_GearChange = 0x8A
+        setup_delay(Gear_Change_DLY, GEAR_CHANGE_AFTER_DELAY)
         
-        
-    ;;;;; 11. Increase throttle right controller to normal
-        
-        RM_Throttle_Compensated = Map_Two_Points(RCV_Throttle, 0, 255, 0, 32767)
-        State_GearChange = 0x8B
-        
-        setup_delay(DLY20, 6)
-        while (DLY20_output <> 0) {}
-        
-        send_mailbox(MAILBOX_SM_MOSI3)
-        Setup_Delay(Smesh_DLY, CAN_DELAY_FOR_ACK)
+        State_GearChange = 0x87
     }
     
-    
-    ;;;;; 12. Receive ACK: Procedure has finished
+    if (State_GearChange = 0x87) {
+        temp_Map_Output_1 = get_muldiv(MTD1, RCV_Throttle, THROTTLE_MULTIP_REDUCE, 128)
+        temp_RM_Throttle = Map_Two_Points(temp_Map_Output_1, 0, 255, 0, 32767)
+        temp_VCL_Throttle = Map_Two_Points(RCV_Throttle, 0, 255, 0, 32767)
+        
+        if (Gear_Change_DLY_output = 0) {
+            State_GearChange = 0x8B
+            
+            send_mailbox(MAILBOX_SM_MOSI3)
+            Setup_Delay(Smesh_DLY, CAN_DELAY_FOR_ACK)
+        }
+        
+    }
     
     if (State_GearChange = 0x8B) {
+        temp_RM_Throttle = Map_Two_Points(RCV_Throttle, 0, 255, 0, 32767)
+        temp_VCL_Throttle = Map_Two_Points(RCV_Throttle, 0, 255, 0, 32767)
         
         if ( (RCV_State_GearChange = 0x8C) | (RCV_State_GearChange = 0x8D) ) {
             ; Right controller has changed throttle
@@ -2061,68 +1946,24 @@ setSmeshTo118:
         }
     }
         
-        
-    ;;;;; 12. Change is successful, thus speed_to_RPM can be changed
     if (State_GearChange = 0x8C) {
-        ;Put_Spy_Message("16S",0,"",PSM_TEXT_ONLY)
-        
-        ;Setup_Delay(DLY16, 500)
-        ;while (DLY16_output <> 0) {}			; Wait 500ms before start
+        temp_RM_Throttle = Map_Two_Points(RCV_Throttle, 0, 255, 0, 32767)
+        temp_VCL_Throttle = Map_Two_Points(RCV_Throttle, 0, 255, 0, 32767)
         
         Speed_to_RPM = 1802          ; (G/d)*5305 ... 18/530*5305 ... One decimal
         
         ; Gear state to complete
         State_GearChange = 0x8D
         
-        setup_delay(DLY20, 6)
-        while (DLY20_output <> 0) {}
-        
         send_mailbox(MAILBOX_SM_MOSI3)
         
         Setup_Delay(GEAR_CHANGE_PROT_DLY, PROTECTION_DELAY_GRCHANGE)
     }
     
-    
-    
-    if ( (State_GearChange = 0xFF) | (RCV_State_GearChange = 0xFF) ) {
-        
-        ;Put_Spy_Message("FL_CGR",0,"",PSM_TEXT_ONLY)
-        
-        ;Setup_Delay(DLY16, 500)
-        ;while (DLY16_output <> 0) {}			; Wait 500ms before start
-        
-        clear_DigOut(SmeshLeftPin)                          ; Change gear
-        clear_DigOut(SmeshRightPin)                          ; Change gear
-        State_GearChange = 0x8D
+    return
 
-        ; Abort mission
-        ;RCV_State_GearChange = 0
-        ;State_GearChange = 0xFF
-        ;
-        ;Drive_Current_Limit = temp_Drive_Current_Limit
-        ;RM_Drive_Current_Limit = temp_Drive_Current_Limit
-        ;VCL_Throttle = get_muldiv(MTD1, THROTTLE_MULTIP_REDUCE, RCV_Throttle, 128)
-        ;RM_Throttle_Compensated = RCV_Throttle
-        ;
-        ;send_mailbox(MAILBOX_SM_MOSI3)
-        ;
-        ;Setup_Delay(Smesh_DLY, CAN_DELAY_FOR_ACK*2)
-        ;while ((Smesh_DLY_output <> 0) & (RCV_State_GearChange <> 0xFF)) {}		; Wait until right controller has changed throttle
-       ; 
-        ;if (RCV_State_GearChange = 0xFF) {
-        ;    ; Slave accepts mission abort, reset left throttle
-        ;    VCL_Throttle = RCV_Throttle
-        ;} else {
-        ;    ; Serious CAN problems, turn off throttle
-        ;    RM_Throttle_Compensated = 0
-        ;    VCL_Throttle = 0
-         ;   
-        ;}
-        ;send_mailbox(MAILBOX_SM_MOSI3)
-        
-    }
-	
-	return    
+    
+
 
 
 
