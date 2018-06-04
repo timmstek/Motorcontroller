@@ -48,13 +48,12 @@ VCL_App_Ver = 012
 
 
 ;  QUESTIONS CURTIS:
-;;;;   Battery_Current, how many decimals (0-12800)? 
+;;;;   Current_Request, how many decimals (0-12800)? 
 ;;;;   Brake command does not override throttle command ; When error is encountered again, send tact file
 
 
 ; TO DO:
 ; Get Batteries working with controller. Then get more info from 1 battery
-;- low prio main loop           <- causes deadlock
 
 ; TEST:
 ; Errors cleared by key switch cycle 
@@ -275,7 +274,7 @@ create Batt_ErrorMSG4 variable                      ; Battery fault bits #4
 
 
 ; Efficiency calculation
-LM_Efficiency                     alias      user11     ; Left controller Efficiency
+LM_Efficiency_Perc                     alias      user11     ; Left controller Efficiency
 Power_In                          alias      user13     ; Input Power
 Power_Out                         alias      user14     ; Ouput Power
 Motor_Rads                        alias      user15     ; Rotor speed [rad/s]
@@ -469,9 +468,9 @@ User_Fault_Action_16 = 1101100000000000b            ; Shutdown motor, shut down 
 
 ;--------------- OUTPUTS ----------------
 ;Main contactor     alias PWM1					;Pin J1-06
-Fan1IN				alias PWM2					;Pin J1-05
-Fan2OUT				alias PWM3					;Pin J1-04
-;FREE				alias PWM4					;Pin J1-03
+; EM Brake			alias PWM2					;Pin J1-05
+Fan1IN				alias PWM3					;Pin J1-04
+Fan2OUT				alias PWM4					;Pin J1-03
 ;Free				alias PWM5					;Pin J1-02
 
 SmeshLeftPin			alias DigOut6				;Pin J1-19 (16 OFF(clear); 118 ON(set))
@@ -769,7 +768,7 @@ startupCANSystem:
         @Temp_Contr_Display,		; Temperature of Controllers
         @state_DNR,			    ; Temperature errors from Batteries
         @Temp_Index_Display,		; Index which motor, controller and battery is the hottest (M-C)
-        @LM_Efficiency,            ; Regen, Eco or power region
+        @LM_Efficiency_Perc,            ; Regen, Eco or power region
 		@State_Of_Charge)
 
 
@@ -1198,11 +1197,11 @@ faultHandling:
     RM_Battery_Regen_Power_Limit = Battery_Regen_Power_Limit
     
     ; Control Power Limiting
-    if (Battery_Current > CURRENT_THRESHOLD_POWER_LIMITING) {
+    if (Current_Request > CURRENT_THRESHOLD_POWER_LIMITING) {
         ; Motors are consuming current
         Battery_Power_Limit = Battery_Drive_Power_Limit
         
-    } else if (Battery_Current < -CURRENT_THRESHOLD_POWER_LIMITING) {
+    } else if (Current_Request < -CURRENT_THRESHOLD_POWER_LIMITING) {
         ; Motors are producing current
         Battery_Power_Limit = Battery_Regen_Power_Limit
         
@@ -1339,7 +1338,7 @@ controlFans:
     
     
 calculateEfficiency:
-    Power_In = get_muldiv(MTD1, Battery_Current, Capacitor_Voltage, 640)        ; Battery_Current  ; Capacitor_Voltage 0-200V (0-12800) [W]
+    Power_In = get_muldiv(MTD1, Current_Request, Capacitor_Voltage, 640)        ; Current_Request  ; Capacitor_Voltage 0-200V (0-12800) [W]
     
     if (Motor_RPM >= 0) {
         Motor_Rads = Map_Two_Points(Motor_RPM, 0, 12000, 0, 1257)
@@ -1347,9 +1346,9 @@ calculateEfficiency:
         Motor_Rads = Map_Two_Points(-Motor_RPM, 0, 12000, 0, -1257)
     }
     
-    Power_Out = Motor_Torque * Motor_Rads               ; Motor_Torque ; Motor_RPM -12000-12000rpm (-12000-12000) [W]
+    Power_Out = get_muldiv(MTD2, Motor_Torque, Motor_Rads, 10)               ; Motor_Torque 1 decimal [Nm] ; Motor_RPM -12000-12000rpm (-12000-12000) [W]
     
-    LM_Efficiency = get_muldiv(MTD2, Power_Out, 255, Power_In)
+    LM_Efficiency_Perc = get_muldiv(MTD3, Power_Out, 100, Power_In)
 
     return
     
@@ -1417,6 +1416,11 @@ DNRStatemachine:
             
             send_mailbox(MAILBOX_SM_MOSI3)
         }
+        
+        if (RCV_DNR_Command <> 0) {
+            RCV_DNR_Command = 0
+        }
+        state_DNR = NEUTRAL
     }
     
     
@@ -1470,16 +1474,16 @@ DNRStatemachine:
         temp_VCL_Throttle = 0
         temp_RM_Throttle = temp_VCL_Throttle
         
-        if (RCV_DNR_Command = DNR_DRIVE) {          ; if received DNR command is Drive
+        if ( (RCV_DNR_Command = DNR_DRIVE) & (Key_Switch = 1) ) {          ; if received DNR command is Drive
             
             RCV_DNR_Command = 0     ; Clear Command from RDW scherm
             
             state_DNR= PRE_DRIVE
-        } else if (RCV_DNR_Command = DNR_REVERSE) {       ; if received DNR command is Reverse
+        } else if ( (RCV_DNR_Command = DNR_REVERSE) & (Key_Switch = 1) ) {       ; if received DNR command is Reverse
             RCV_DNR_Command = 0     ; Clear Command from RDW scherm
             
             state_DNR= PRE_REVERSE
-        } else if (RCV_DNR_Command = DNR_NEUTRAL) {          ; if received DNR command is Neutral
+        } else if ( (RCV_DNR_Command = DNR_NEUTRAL) & (Key_Switch = 1) ) {          ; if received DNR command is Neutral
             RCV_DNR_Command = 0     ; Clear Command from RDW scherm
         }
         
