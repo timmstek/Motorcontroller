@@ -1753,9 +1753,6 @@ setSmeshTo16Simple:
         
     }
     
-    
-    
-    
     if ((State_GearChange = 0x64)) {
         temp_Map_Output_1 = get_muldiv(MTD1, RCV_Throttle, THROTTLE_MULTIP_REDUCE, 128)
         temp_RM_Throttle = Map_Two_Points(temp_Map_Output_1, 0, 255, 0, 32767)
@@ -1799,10 +1796,6 @@ setSmeshTo16Simple:
         }
         
     }
-    
-    
-    
-    
     
     if (State_GearChange = 0x6B) {
         temp_RM_Throttle = Map_Two_Points(RCV_Throttle, 0, 255, 0, 32767)
