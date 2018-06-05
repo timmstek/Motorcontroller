@@ -274,10 +274,14 @@ create Batt_ErrorMSG4 variable                      ; Battery fault bits #4
 
 
 ; Efficiency calculation
-LM_Efficiency_Perc                     alias      user11     ; Left controller Efficiency
+LM_Efficiency_Perc                alias      user11     ; Left controller Efficiency
+Power_Dissip_Controller           alias      user12
 Power_In                          alias      user13     ; Input Power
 Power_Out                         alias      user14     ; Ouput Power
-Motor_Rads                        alias      user15     ; Rotor speed [rad/s]
+Power_Mech                        alias      user15
+Motor_Rads                        alias      user16     ; Rotor speed [rad/s]
+Volt_In                           alias      user17
+Volt_Out                          alias      user18
 
 
 ; Steering angle
@@ -411,7 +415,8 @@ MAILBOX_MOSI_INIT_PARAM2_addr           constant 0x104
 ;------------------- Maps --------------------
 MAP_GEAR16                              alias MAP1
 MAP_GEAR118                             alias MAP2
-Angle2Multiplier_MAP                    alias MAP4
+Angle2Multiplier_MAP                    alias MAP3
+PowerDissipContr_MAP                    alias MAP4
 
 ;----------- User Defined Faults ------------
 Fault_System_Battery                    alias   user119
@@ -607,6 +612,8 @@ Mainloop:
         
         setup_delay(Low_Prio_Loop_DLY, LOW_PRIO_LOOP_RATE)
     }
+    
+    test = test + 1
     
     
     goto mainLoop 
@@ -1260,6 +1267,16 @@ setup_2D_MAP:
         0, 0,
         0, 0,
         0, 0)
+        
+    ; Power dissipation of the controller [W]
+    setup_map(PowerDissipContr_MAP, 7,      ; Number of points
+        0, 0,      ; Steering to the left
+       75, 41,                         ; 
+      100, 71,      ; Steering to the right
+      125, 109,
+      150, 155,
+      175, 210,
+      250, 423)
     
     return
 
@@ -1338,17 +1355,20 @@ controlFans:
     
     
 calculateEfficiency:
-    Power_In = get_muldiv(MTD1, Current_Request, Capacitor_Voltage, 640)        ; Current_Request  ; Capacitor_Voltage 0-200V (0-12800) [W]
     
-    if (Motor_RPM >= 0) {
-        Motor_Rads = Map_Two_Points(Motor_RPM, 0, 12000, 0, 1257)
-    } else {
-        Motor_Rads = Map_Two_Points(-Motor_RPM, 0, 12000, 0, -1257)
-    }
+    Motor_Rads = Map_Two_Points(ABS_Motor_RPM, 0, 12000, 0, 1257)
+    Power_Mech = get_muldiv(MTD2, Motor_Torque, Motor_Rads, 10)               ; Motor_Torque 1 decimal [Nm] ; Motor_RPM -12000-12000rpm (-12000-12000) ; [W]
     
-    Power_Out = get_muldiv(MTD2, Motor_Torque, Motor_Rads, 10)               ; Motor_Torque 1 decimal [Nm] ; Motor_RPM -12000-12000rpm (-12000-12000) [W]
+    Volt_In = Map_Two_Points(Capacitor_Voltage, 0, 12800, 0, 2000)          ; 1 decimal
+    Volt_Out = Map_Two_Points(Modulation_Depth, 0, 1182, 0, Volt_In)        ; 1 decimal
+    Power_Out = get_muldiv(MTD3, Volt_Out, Current_RMS, 100)                ; [W]
     
-    LM_Efficiency_Perc = get_muldiv(MTD3, Power_Out, 100, Power_In)
+    Power_Dissip_Controller = get_map_output(PowerDissipContr_MAP, Current_RMS)     ; [W]
+    
+    Power_In = Power_Out + Power_Dissip_Controller
+    
+    LM_Efficiency_Perc = get_muldiv(MTD1, Power_Mech, 100, Power_In)
+    
 
     return
     
