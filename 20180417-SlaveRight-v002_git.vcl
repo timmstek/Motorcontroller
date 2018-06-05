@@ -68,7 +68,7 @@ CAN_CYCLIC_RATE					constant    25	    ; this sets the cyclic cycle to every 100
 CAN_DELAY_FOR_ACK               constant    100
 
 MULTIPLIER_CAN_NOTHING_RECEIVE  constant    2       ; Cyclic Rate times 2. If nothing is received from slave for this amount of time, create error
-CAN_NOTHING_RECEIVE_INIT        constant    1000
+CAN_NOTHING_RECEIVE_INIT        constant    8000
 
 ; Timers
 MAX_TIME_GEARCHANGE			    constant    1500    ; Maximum time gear change may take [ms]

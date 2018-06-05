@@ -93,6 +93,8 @@ DEBOUNCE_INPUTS					constant    5		; this sets the debounce time for switch inpu
 
 LOW_PRIO_LOOP_RATE              constant    100     ; 
 
+EFFICIENCY_AVERAGE_SAMPLES      constant    10      
+
 ; CAN Settings
 CAN_DELAY_FOR_ACK               constant    500     ; in ms
 CAN_EMERGENCY_DELAY_ACK         constant    100
@@ -100,7 +102,7 @@ CAN_LOWPRIORITY_RATE            constant    800     ; sets the cyclic rate of lo
 CAN_CYCLIC_RATE					constant    25		; this sets the cyclic cycle to every 100 ms, 4mS/unit
 
 MULTIPLIER_CAN_NOTHING_RECEIVE  constant    2       ; Cyclic Rate times 2. If nothing is received from slave for this amount of time, create error
-CAN_NOTHING_RECEIVE_INIT        constant    1000
+CAN_NOTHING_RECEIVE_INIT        constant    8000
 
 ; Fan Settings
 FAN_TEMPERATURE_HYSTER          constant    5       ; Temperature should first drop this amount under threshold to turn off fans
@@ -195,6 +197,21 @@ create RCV_Request_Slave_Param variable
 create XMT_BATT_DRIVE_PWR_LIM_INIT variable
 create XMT_CURRENT_THRESHOLD_POWER_LIMITING variable
 
+;------------- Efficiency ---------------
+
+create LM_Efficiency_Perc variable      ; Left controller Efficiency
+create LM_Efficiency_Perc_new variable
+create LM_Efficiency_Perc_AVG variable
+create Volt_In variable
+create Volt_Out variable
+create Power_In variable                ; Input Power
+create Power_Out variable               ; Ouput Power
+create Power_Mech variable
+create Motor_Rads variable              ; Rotor speed [rad/s]
+create Power_Dissip_Controller variable
+create cycleEfficiencyCalc variable
+create cyclePlus1 variable
+
 ;-------------- Temporaries ---------------
 
 create  temp_Map_Output_1   variable
@@ -271,13 +288,6 @@ create Batt_ErrorMSG4 variable                      ; Battery fault bits #4
 
 
 ;Standard user variables (max. 120 user, 16 bit)
-
-
-; Efficiency calculation
-LM_Efficiency_Perc                     alias      user11     ; Left controller Efficiency
-Power_In                          alias      user13     ; Input Power
-Power_Out                         alias      user14     ; Ouput Power
-Motor_Rads                        alias      user15     ; Rotor speed [rad/s]
 
 
 ; Steering angle
@@ -411,7 +421,8 @@ MAILBOX_MOSI_INIT_PARAM2_addr           constant 0x104
 ;------------------- Maps --------------------
 MAP_GEAR16                              alias MAP1
 MAP_GEAR118                             alias MAP2
-Angle2Multiplier_MAP                    alias MAP4
+Angle2Multiplier_MAP                    alias MAP3
+PowerDissipContr_MAP                    alias MAP4
 
 ;----------- User Defined Faults ------------
 Fault_System_Battery                    alias   user119
@@ -599,12 +610,15 @@ Mainloop:
     
     call DNRStatemachine
     
+    call calculateEfficiency
+    
     if (Low_Prio_Loop_DLY_output = 0) {
         
         call controlFans
-    
-        call calculateEfficiency
         
+        cycleEfficiencyCalc = 0
+        LM_Efficiency_Perc_AVG = Map_Two_Points(LM_Efficiency_Perc, 0, 32767, 0, 100)
+    
         setup_delay(Low_Prio_Loop_DLY, LOW_PRIO_LOOP_RATE)
     }
     
@@ -768,7 +782,7 @@ startupCANSystem:
         @Temp_Contr_Display,		; Temperature of Controllers
         @state_DNR,			    ; Temperature errors from Batteries
         @Temp_Index_Display,		; Index which motor, controller and battery is the hottest (M-C)
-        @LM_Efficiency_Perc,            ; Regen, Eco or power region
+        @LM_Efficiency_Perc_AVG,            ; Regen, Eco or power region
 		@State_Of_Charge)
 
 
@@ -1260,6 +1274,16 @@ setup_2D_MAP:
         0, 0,
         0, 0,
         0, 0)
+        
+    ; Power dissipation of the controller [W]
+    setup_map(PowerDissipContr_MAP, 7,      ; Number of points
+        0, 0,      ; Steering to the left
+       75, 41,                         ; 
+      100, 71,      ; Steering to the right
+      125, 109,
+      150, 155,
+      175, 210,
+      250, 423)
     
     return
 
@@ -1338,17 +1362,35 @@ controlFans:
     
     
 calculateEfficiency:
-    Power_In = get_muldiv(MTD1, Current_Request, Capacitor_Voltage, 640)        ; Current_Request  ; Capacitor_Voltage 0-200V (0-12800) [W]
     
-    if (Motor_RPM >= 0) {
-        Motor_Rads = Map_Two_Points(Motor_RPM, 0, 12000, 0, 1257)
-    } else {
-        Motor_Rads = Map_Two_Points(-Motor_RPM, 0, 12000, 0, -1257)
+    if (cycleEfficiencyCalc < EFFICIENCY_AVERAGE_SAMPLES) {
+        
+        Motor_Rads = get_muldiv(MTD1, Motor_RPM, 628, 6000)
+        Power_Mech = get_muldiv(MTD2, Motor_Torque, Motor_Rads, 10)               ; Motor_Torque 1 decimal [Nm] ; Motor_RPM -12000-12000rpm (-12000-12000) ; [W]
+        
+        Volt_In = Map_Two_Points(Capacitor_Voltage, 0, 12800, 0, 2000)          ; 1 decimal
+        Volt_Out = Map_Two_Points(Modulation_Depth, 0, 1182, 0, Volt_In)        ; 1 decimal
+        Power_Out = get_muldiv(MTD3, Volt_Out, Current_RMS, 100)                ; [W]
+        
+        Power_Dissip_Controller = get_map_output(PowerDissipContr_MAP, Current_RMS)     ; [W]
+        
+        Power_In = Power_Out + Power_Dissip_Controller
+        
+        LM_Efficiency_Perc_new = get_muldiv(MTD1, Power_Mech, 32767, Power_In)
+        
+        
+        ; Averaging
+    
+        cyclePlus1 = cycleEfficiencyCalc + 1
+        
+        temp_Calculation = get_muldiv(MTD2, LM_Efficiency_Perc, cycleEfficiencyCalc, cyclePlus1)
+        temp_Calculation_2 = get_muldiv(MTD3, LM_Efficiency_Perc_new, 1, cyclePlus1)
+        
+        LM_Efficiency_Perc = temp_Calculation + temp_Calculation_2
+        
+        cycleEfficiencyCalc = cyclePlus1
     }
     
-    Power_Out = get_muldiv(MTD2, Motor_Torque, Motor_Rads, 10)               ; Motor_Torque 1 decimal [Nm] ; Motor_RPM -12000-12000rpm (-12000-12000) [W]
-    
-    LM_Efficiency_Perc = get_muldiv(MTD3, Power_Out, 100, Power_In)
 
     return
     
@@ -1555,7 +1597,7 @@ DNRStatemachine:
         temp_Map_Output_1 = get_map_output(MAP_GEAR16, Motor_RPM)
         
         ;if ( (Motor_Torque > temp_Map_Output_1) & (GEAR_CHANGE_PROT_DLY_output = 0) ) {
-        if ( (Motor_RPM < 1400) & (GEAR_CHANGE_PROT_DLY_output = 0) ) {
+        if ( (Motor_RPM < 2100) & (GEAR_CHANGE_PROT_DLY_output = 0) ) {
             ; 1:18 is more efficient, so switch to 1:18
             
             State_GearChange = 0x80
