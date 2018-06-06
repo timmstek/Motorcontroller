@@ -508,15 +508,15 @@ startup_CAN_System:
    			; Partner:		Master controller
 
     Setup_Mailbox(MAILBOX_MOSI_INIT_PARAM2, 0, 0, MAILBOX_MOSI_INIT_PARAM2_addr, C_EVENT, C_RCV, 0, 0)
-    Setup_Mailbox_Data(MAILBOX_MOSI_INIT_PARAM2, 8, 		
+    Setup_Mailbox_Data(MAILBOX_MOSI_INIT_PARAM2, 6, 		
         @Brake_Release_Rate_TrqM,
         @Brake_Release_Rate_TrqM + USEHB,				
         @Neutral_Braking_TrqM, 
         @Neutral_Braking_TrqM + USEHB,
         @BATT_DRIVE_PWR_LIM_INIT,
         @BATT_DRIVE_PWR_LIM_INIT + USEHB,
-        @CURRENT_THRESHOLD_POWER_LIMITING,
-        @CURRENT_THRESHOLD_POWER_LIMITING + USEHB)
+        0,
+        0)
 
 
 
