@@ -108,6 +108,11 @@ create rcvSystemActionACK variable
 create requestParamStatus variable
 create requestSlaveParam variable
 
+create Slave_Param_Var1 variable
+create Slave_Param_Var2 variable
+create Slave_Param_Var3 variable
+create Slave_Param_Var4 variable
+
 ;-------------- Temporaries ---------------
 create  mapOutputTemp   variable
 create  calculationTemp    variable
@@ -171,13 +176,10 @@ MAILBOX_ERROR_MESSAGES_RCV_ACK_addr     constant 0x002
 MAILBOX_MISO_REQUEST_PARAM              alias CAN21
 MAILBOX_MISO_REQUEST_PARAM_addr         constant 0x112
 
-MAILBOX_MOSI_INIT_PARAM1                alias CAN22
-MAILBOX_MOSI_INIT_PARAM1_received       alias CAN22_received
-MAILBOX_MOSI_INIT_PARAM1_addr           constant 0x103
+MAILBOX_MOSI_INIT_PARAM                alias CAN22
+MAILBOX_MOSI_INIT_PARAM_received       alias CAN22_received
+MAILBOX_MOSI_INIT_PARAM_addr           constant 0x103
 
-MAILBOX_MOSI_INIT_PARAM2                alias CAN23
-MAILBOX_MOSI_INIT_PARAM2_received       alias CAN23_received
-MAILBOX_MOSI_INIT_PARAM2_addr           constant 0x104
 
 
 
@@ -479,32 +481,17 @@ startup_CAN_System:
    			; Type:			MOSI
    			; Partner:		Master controller
 
-    setup_mailbox(MAILBOX_MOSI_INIT_PARAM1, 0, 0, MAILBOX_MOSI_INIT_PARAM1_addr, C_EVENT, C_RCV, 0, 0)
-    setup_mailbox_data(MAILBOX_MOSI_INIT_PARAM1, 8, 		
-        @Max_Speed_TrqM,
-        @Max_Speed_TrqM + USEHB,				
-        @Accel_Rate_TrqM, 
-        @Accel_Rate_TrqM + USEHB,
-        @Accel_Release_Rate_TrqM,
-        @Accel_Release_Rate_TrqM + USEHB,
-        @Brake_Rate_TrqM,
-        @Brake_Rate_TrqM + USEHB)
+    setup_mailbox(MAILBOX_MOSI_INIT_PARAM, 0, 0, MAILBOX_MOSI_INIT_PARAM_addr, C_EVENT, C_RCV, 0, 0)
+    setup_mailbox_data(MAILBOX_MOSI_INIT_PARAM, 8, 		
+        @Slave_Param_Var1,
+        @Slave_Param_Var1 + USEHB,				
+        @Slave_Param_Var2, 
+        @Slave_Param_Var2 + USEHB,
+        @Slave_Param_Var3,
+        @Slave_Param_Var3 + USEHB,
+        @Slave_Param_Var4,
+        @Slave_Param_Var4 + USEHB)
         
-            ; MAILBOX 23
-   			; Purpose:		receive information: Parameters at Init
-   			; Type:			MOSI
-   			; Partner:		Master controller
-
-    setup_mailbox(MAILBOX_MOSI_INIT_PARAM2, 0, 0, MAILBOX_MOSI_INIT_PARAM2_addr, C_EVENT, C_RCV, 0, 0)
-    setup_mailbox_data(MAILBOX_MOSI_INIT_PARAM2, 6, 		
-        @Brake_Release_Rate_TrqM,
-        @Brake_Release_Rate_TrqM + USEHB,				
-        @Neutral_Braking_TrqM, 
-        @Neutral_Braking_TrqM + USEHB,
-        @BATT_DRIVE_PWR_LIM_INIT,
-        @BATT_DRIVE_PWR_LIM_INIT + USEHB,
-        0,
-        0)
 
 
 
@@ -522,14 +509,24 @@ checkCANMailboxes:
     
     ; Receive the right parameters from master
     
-    if (MAILBOX_MOSI_INIT_PARAM1_received = ON) {
+    if ( (MAILBOX_MOSI_INIT_PARAM_received = ON) & (requestParamStatus = 0)) {
+        MAILBOX_MOSI_INIT_PARAM_received = OFF
         
-        MAILBOX_MOSI_INIT_PARAM1_received = OFF
+        Max_Speed_TrqM          = Slave_Param_Var1
+        Accel_Rate_TrqM         = Slave_Param_Var2
+        Accel_Release_Rate_TrqM = Slave_Param_Var3
+        Brake_Rate_TrqM         = Slave_Param_Var4
+        
         requestParamStatus = 1
         
-    } else if (MAILBOX_MOSI_INIT_PARAM2_received = ON) {
+    } else if ( (MAILBOX_MOSI_INIT_PARAM_received = ON) & (requestParamStatus = 1)) {
+        MAILBOX_MOSI_INIT_PARAM_received = OFF
         
-        MAILBOX_MOSI_INIT_PARAM2_received = OFF
+        Brake_Release_Rate_TrqM = Slave_Param_Var1
+        Neutral_Braking_TrqM    = Slave_Param_Var2
+        BATT_DRIVE_PWR_LIM_INIT = Slave_Param_Var3
+        ;FREE                   = Slave_Param_Var4
+        
         requestParamStatus = 2
         
     }

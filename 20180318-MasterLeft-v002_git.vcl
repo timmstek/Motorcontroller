@@ -182,12 +182,18 @@ create riMcFaultSystemACK variable
 create riMcSystemActionACK variable
 create rcvFaultSystemACK variable
 create rcvRiMcFaultSystemACK variable
+create FaultSystemDisplay variable
 
 create interlockXMT variable
 
 create rcvRequestSlaveParam variable
 
 create XMT_BATT_DRIVE_PWR_LIM_INIT variable
+
+create Slave_Param_Var1 variable
+create Slave_Param_Var2 variable
+create Slave_Param_Var3 variable
+create Slave_Param_Var4 variable
 
 ;-------------- Temporaries ---------------
 
@@ -269,6 +275,7 @@ powerMech                           alias      user15
 motorRads                           alias      user16     ; Rotor speed [rad/s]
 inputVoltage                        alias      user17
 outputVoltage                       alias      user18
+powerInDisplay                      alias      user19
 
 
 ; Steering angle
@@ -390,11 +397,8 @@ MAILBOX_MISO_REQUEST_PARAM              alias CAN21
 MAILBOX_MISO_REQUEST_PARAM_received     alias CAN21_received
 MAILBOX_MISO_REQUEST_PARAM_addr         constant 0x112
 
-MAILBOX_MOSI_INIT_PARAM1                alias CAN22
-MAILBOX_MOSI_INIT_PARAM1_addr           constant 0x103
-
-MAILBOX_MOSI_INIT_PARAM2                alias CAN23
-MAILBOX_MOSI_INIT_PARAM2_addr           constant 0x104
+MAILBOX_MOSI_INIT_PARAM                alias CAN22
+MAILBOX_MOSI_INIT_PARAM_addr           constant 0x103
 
 
 ;------------------- Maps --------------------
@@ -620,6 +624,9 @@ mainLoop:
 
 
 startupCANSystem:
+    
+    ;TODO: 0x410 send to toradex: temperature motor (-50 - 205), controller, Battery, Batt volt, batt current (2 byte)
+    ; 0x411: Range (0-255 km), Torque per axis (0-255 Nm)
 
    			; CAN mailboxes 1-5 are available to VCL CAN. Mailboxes 6-14 are available for CANopen
    			; C_SYNC is buddy check, C_CYCLIC is cyclic CAN messages, C_EVENT are called with send_mailbox()
@@ -750,15 +757,15 @@ startupCANSystem:
    			; Partner:		RDW Scherm
 
     setup_mailbox(MAILBOX_RDW_XMT, 0, 0, MAILBOX_RDW_XMT_addr, C_CYCLIC, C_XMT, 0, 0)
-    setup_mailbox_data(MAILBOX_RDW_XMT, 8,
+    setup_mailbox_data(MAILBOX_RDW_XMT, 5,
         @Vehicle_Speed,				; Speed of the wheels
-        @Vehicle_Speed + USEHB,
-        @motorTempDisplay,		; Temperature of Motors
-        @contrTempDisplay,		; Temperature of Controllers
-        @stateDNR,			    ; Temperature errors from Batteries
-        @tempDisplayTemp,		; Index which motor, controller and battery is the hottest (M-C)
-        @leMcEfficiencyPerc,            ; Regen, Eco or power region
-		@stateOfCharge)
+        @leMcEfficiencyPerc,
+        @powerInDisplay,            ; TODO: send verbruik 0-150 1 decimal kW
+        @stateOfCharge,
+        @stateDNR,			        ; Temperature errors from Batteries
+        0,		                    ; Index which motor, controller and battery is the hottest (M-C)
+        0,                          ; Regen, Eco or power region
+		0)
 
 
    			; MAILBOX 13
@@ -835,10 +842,10 @@ startupCANSystem:
    			; Partner:		RDW Scherm
 
     setup_mailbox(MAILBOX_ERROR_MESSAGES, 0, 0, MAILBOX_ERROR_MESSAGES_addr, C_EVENT, C_XMT, 0, 0)
-    setup_mailbox_data(MAILBOX_ERROR_MESSAGES, 2, 		
+    setup_mailbox_data(MAILBOX_ERROR_MESSAGES, 3, 		
+        @FaultSystemDisplay,               ; TODO: 0,1,2 (good, worse bad)
         @FaultSystem,
         @riMcFaultSystem,
-        0,
         0,
         0,
         0,
@@ -917,32 +924,16 @@ startupCANSystem:
    			; Type:			MOSI
    			; Partner:		Slave controller
 
-    setup_mailbox(MAILBOX_MOSI_INIT_PARAM1, 0, 0, MAILBOX_MOSI_INIT_PARAM1_addr, C_EVENT, C_XMT, 0, 0)
-    setup_mailbox_data(MAILBOX_MOSI_INIT_PARAM1, 8, 		
-        @Max_Speed_TrqM,
-        @Max_Speed_TrqM + USEHB,				
-        @Accel_Rate_TrqM, 
-        @Accel_Rate_TrqM + USEHB,
-        @Accel_Release_Rate_TrqM,
-        @Accel_Release_Rate_TrqM + USEHB,
-        @Brake_Rate_TrqM,
-        @Brake_Rate_TrqM + USEHB)
-        
-            ; MAILBOX 23
-   			; Purpose:		send information: Parameters at Init
-   			; Type:			MOSI
-   			; Partner:		Slave controller
-
-    setup_mailbox(MAILBOX_MOSI_INIT_PARAM2, 0, 0, MAILBOX_MOSI_INIT_PARAM2_addr, C_EVENT, C_XMT, 0, 0)
-    setup_mailbox_data(MAILBOX_MOSI_INIT_PARAM2, 6, 		
-        @Brake_Release_Rate_TrqM,
-        @Brake_Release_Rate_TrqM + USEHB,				
-        @Neutral_Braking_TrqM, 
-        @Neutral_Braking_TrqM + USEHB,
-        @XMT_BATT_DRIVE_PWR_LIM_INIT,
-        @XMT_BATT_DRIVE_PWR_LIM_INIT + USEHB,
-        0,
-        0)
+    setup_mailbox(MAILBOX_MOSI_INIT_PARAM, 0, 0, MAILBOX_MOSI_INIT_PARAM_addr, C_EVENT, C_XMT, 0, 0)
+    setup_mailbox_data(MAILBOX_MOSI_INIT_PARAM, 8, 		
+        @Slave_Param_Var1,
+        @Slave_Param_Var1 + USEHB,				
+        @Slave_Param_Var2, 
+        @Slave_Param_Var2 + USEHB,
+        @Slave_Param_Var3,
+        @Slave_Param_Var3 + USEHB,
+        @Slave_Param_Var4,
+        @Slave_Param_Var4 + USEHB)
         
 
 
@@ -982,9 +973,22 @@ CheckCANMailboxes:
         MAILBOX_MISO_REQUEST_PARAM_received = OFF
         
         if (rcvRequestSlaveParam = 1) {
-            send_mailbox(MAILBOX_MOSI_INIT_PARAM1)
+            
+            Slave_Param_Var1 = Max_Speed_TrqM
+            Slave_Param_Var2 = Accel_Rate_TrqM
+            Slave_Param_Var3 = Accel_Release_Rate_TrqM
+            Slave_Param_Var4 = Brake_Rate_TrqM
+        
+            send_mailbox(MAILBOX_MOSI_INIT_PARAM)
+            
         } else if (rcvRequestSlaveParam = 2) {
-            send_mailbox(MAILBOX_MOSI_INIT_PARAM2)
+            
+            Slave_Param_Var1 = Brake_Release_Rate_TrqM
+            Slave_Param_Var2 = Neutral_Braking_TrqM
+            Slave_Param_Var3 = XMT_BATT_DRIVE_PWR_LIM_INIT
+            Slave_Param_Var4 = 0
+        
+            send_mailbox(MAILBOX_MOSI_INIT_PARAM)
         }
     }
     
@@ -998,6 +1002,8 @@ CheckCANMailboxes:
         setup_delay(communicationSlaveErrorDLY, calculationTemp1)
         
     }
+    
+    ; TODO: vehicle_speed int 1 byte
     
 
     return
@@ -1054,16 +1060,15 @@ retrieveErrors:
         generalFault = OFF
     } else {
         generalFault = ON
-    }
-    
-    if (rcvRiMcFaultSystem = 0) {
-        
-    }
-    
+    } 
     
     
     if (rcvSystemAction <> 0) {
+        FaultSystemDisplay = 3
+        
         System_Action = rcvSystemAction
+    } else if (System_Action <> 0) {
+        FaultSystemDisplay = 3
     }
     
     riMcFaultSystem = rcvRiMcFaultSystem
@@ -1078,12 +1083,13 @@ retrieveErrors:
 faultHandling:
     
     ; When the errors are dissappeared, clear the errors
-    ;test = 11
+
     call retrieveErrors
     
-    ;test = 13
     
     if ( (regenFault = ON) | (riMcRegenFault = ON) ) {
+        
+        FaultSystemDisplay = 1
         
         set_ramp_target(regenFaultRMP, TIME_TO_FULL_LOS_FAULT)          ; Target is 6000ms
         
@@ -1092,12 +1098,16 @@ faultHandling:
     }
     if ( (driveFault = ON) | (riMcDriveFault = ON) ) {
         
+        FaultSystemDisplay = 1
+        
         set_ramp_target(driveFaultRMP, TIME_TO_FULL_LOS_FAULT)          ; Target is 6000ms
         
         LOSActive = 1
         
     }
     if ( (tempFault = ON) | (riMcTempFault = ON) ) {
+        
+        FaultSystemDisplay = 1
         
         set_ramp_target(driveFaultRMP, TIME_TO_FULL_LOS_FAULT)          ; Target is 6000ms
         
@@ -1107,6 +1117,8 @@ faultHandling:
         
     }
     if ( (generalFault = ON) | (riMcGeneralFault = ON) ) {
+        
+        FaultSystemDisplay = 1
         
         set_ramp_target(driveFaultRMP, TIME_TO_FULL_LOS_FAULT)          ; Target is 6000ms
         
@@ -1120,6 +1132,8 @@ faultHandling:
         ; When there are no faults, set current limits normally
         ; When gear change is busy, don't set limits normally
         
+        FaultSystemDisplay = 0
+        
         set_ramp_target(driveFaultRMP, 0)          ; Target is 0ms
         
         set_ramp_target(regenFaultRMP, 0)          ; Target is 0ms
@@ -1127,7 +1141,6 @@ faultHandling:
         LOSActive = 0
     }
     
-    ;test = 14
     
     ; Drive limiting
     if (driveFaultRMP_output = 0) {
@@ -1150,6 +1163,7 @@ faultHandling:
         battRegenPowerLim = map_two_points(mapOutputTemp1, 0, 100, BATTERY_REGEN_POWER_LIMIT_MIN, BATT_REGEN_PWR_LIM_INIT)
     }
     riMcBattRegenPowerLim = battRegenPowerLim
+    
     
     ; Control Power Limiting
     if (Regen_State = OFF) {
@@ -1315,6 +1329,7 @@ calculateEfficiency:
     
     leMcEfficiencyPerc = get_muldiv(MTD1, powerMech, 100, powerIn)
     
+    powerInDisplay = map_two_points(powerIn, 0, 25500, 0, 255)
 
     return
     
