@@ -53,7 +53,7 @@ VCL_App_Ver = 012
 
 
 ; TO DO:
-; Get Batteries working with controller. Then get more info from 1 battery
+; Predict range
 
 ; TEST:
 ; current cutbacks
@@ -61,6 +61,10 @@ VCL_App_Ver = 012
 
 ; In Car:
 ; - Torque limiting
+
+; Experiments:
+; - Position Hold
+; - 
 
 
 ; REMINDER:
@@ -99,17 +103,17 @@ CAN_NOTHING_RECEIVE_INIT        constant    1000
 
 ; Fan Settings
 FAN_TEMPERATURE_HYSTER          constant    5       ; Temperature should first drop this amount under threshold to turn off fans
-MOTOR_COOLDOWN_THOLD            constant    60      ; from this temperature in C Fans will turn on
-CONTROLLER_COOLDOWN_THOLD       constant    50
-MOTOR_TEMP_FAN_MAX              constant    85      ; At this temperature of motor, fans are spinning at maximum
-CONTR_TEMP_FAN_MAX              constant    75
+MOTOR_COOLDOWN_THOLD            constant    110     ; from this temperature in C Fans will turn on, offset -50 C: 60 +50=110
+CONTROLLER_COOLDOWN_THOLD       constant    100     ; offset -50 C: 50 +50=100
+MOTOR_TEMP_FAN_MAX              constant    135     ; At this temperature of motor, fans are spinning at maximum, offset -50 C: 85 +50=135
+CONTR_TEMP_FAN_MAX              constant    125     ; offset -50 C: 75 +50=125
 FANSPEED_IDLE_IN                constant    10      ; In idle mode, fans will always run at 10%
 FANSPEED_IDLE_OUT               constant    0
 
 
 ; Current settings
 BATT_DRIVE_PWR_LIM_INIT         constant    20          ; per 10W
-BATT_REGEN_PWR_LIM_INIT         constant    20           ; per 10W
+BATT_REGEN_PWR_LIM_INIT         constant    30           ; per 10W
 
 BATTERY_DRIVE_POWER_LIMIT_MIN   constant    0
 BATTERY_REGEN_POWER_LIMIT_MIN   constant    0
@@ -119,6 +123,12 @@ REDUCED_REGEN_INPUT_CURLIM_PERC constant    15      ; Regen current limit is 15%
 REVERSE_THROTTLE_MULTIPLIER     constant    128     ; 90% of 128 = 115
 TIME_TO_FULL_LOS_FAULT          constant    10000    ; Time it takes to go to full effect of the reduced current limits
                                                     ; Due to a fault, max 6000 ms
+                                                    
+NEUTRAL_BRAKING_INIT            constant    15000        ; 10% of 32767
+                              
+BATT_CUR_LIM_FAULT_MARGIN       constant    80
+BATT_VOLT_LIM_FAULT_MARGIN      constant    95
+BATT_TEMP_FAULT_MARGIN          constant    90
 
 ; DNR, Gear change and steering settings
 GEAR_CHANGE_BEFORE_DELAY        constant    2000
@@ -176,6 +186,10 @@ create rcvSystemAction variable
 
 create HPO variable
 
+;-------- Range prediction ---------
+
+create rangePredict variable
+
 ;-------------- CAN ---------------
 
 create riMcFaultSystemACK variable
@@ -185,6 +199,9 @@ create rcvRiMcFaultSystemACK variable
 create FaultSystemDisplay variable
 
 create interlockXMT variable
+
+create vehicleSpeedDisplay variable
+create torqueDisplay variable
 
 create rcvRequestSlaveParam variable
 
@@ -223,6 +240,46 @@ create startStopActive variable
 
 ;-------------- Batteries ---------------
 
+create battTempDisplay variable
+create battVoltDisplay variable
+create battCurDisplay variable
+create battVoltDeci variable
+create battCurDeci variable
+
+create rcvBattVolt variable					   ; Voltage range 0-512V variable -32767 - 32767
+create rcvBattCur variable                      ; Current range -1000 - 1000
+
+create rcvBattTempBMS variable                  ; Temperature per 1 degree C -32767 - 32767
+create rcvBattChargeUnderTemp variable          ; -128 - 127 C
+create rcvBattDischargeOverTemp variable        ; -128 - 127 C
+create rcvBattTempCell1 variable
+create rcvBattTempCell2 variable
+
+create battChargeUnderTempPrev variable
+create battDischargeOverTempPrev variable
+create battChargeUnderTempMargin variable
+create battDischargeOverTempMargin variable
+
+create rcvBattCurLimCharge variable               ; -512 - 512
+create rcvBattCurLimDischarge variable             ; -512 - 512
+create rcvBattVoltLimCharge variable              ; 0 - 256
+create rcvBattVoltLimDischarge variable            ; 0 - 256
+
+create battCurLimChargeMargin variable
+create battVoltLimChargeMargin variable
+create battCurLimDischargeMargin variable
+create battVoltLimDischargeMargin variable
+create battVoltLimChargeDeci variable
+create battVoltLimDischargeDeci variable
+
+create battCurLimChargePrev variable
+create battVoltLimChargePrev variable
+create battCurLimDischargePrev variable
+create battVoltLimDischargePrev variable
+
+create battCurLimChargeDeci variable
+create battCurLimDischargeDeci variable
+
 create battSerial1 variable                        ; Serial number of Battery
 create battSerial2 variable                        
 create stateOfCharge variable                     ; Percentage of the capacity (0-100)
@@ -252,9 +309,9 @@ create battErrorMsg3 variable                      ; Battery fault bits #3
     battCMCellOvervoltage               bit        battErrorMsg3.4           ; 1=Voltage in one or more cells too high
     ;EMPTY
     battChargeTempHigh                  bit        battErrorMsg3.16          ; 1=Charge temperature too high
-    battDischargeTempHigh               bit        battErrorMsg3.32          ; 1=Disharge temperature too high
+    battDischargeTempHigh               bit        battErrorMsg3.32          ; 1=Discharge temperature too high
     battChargeTempLow                   bit        battErrorMsg3.64          ; 1=Charge temperature too low
-    battDischargeTempLow                bit        battErrorMsg3.128          ; 1=Disharge temperature too low
+    battDischargeTempLow                bit        battErrorMsg3.128          ; 1=Discharge temperature too low
 
 create battErrorMsg4 variable                      ; Battery fault bits #4
 	battLeakCurrent                     bit        battErrorMsg4.1           ; 1=Leakage current detected
@@ -290,8 +347,12 @@ riMcBattRegenPowerLim               alias      user30     ; Regen current limit 
 riMcBattDrivePowerLim               alias      user31     ; Drive current limit for Right controller
 battRegenPowerLim                   alias      user32     ; Regen current limit for Left controller
 battDrivePowerLim                   alias      user33     ; Drive current limit for Left controller
+battRegenPowerLimTemp1              alias      user34
+battRegenPowerLimTemp2              alias      user35
+battDrivePowerLimTemp1              alias      user36
+battDrivePowerLimTemp2              alias      user37
 
-LOSActive                           alias      user34
+LOSActive                           alias      user38
 
 ; DNR and Throttle
 riMcThrottleComp                    alias      user40           			; Torque for right motorcontroller, command to Right controller
@@ -321,6 +382,7 @@ keySwitch                           alias      user63     ; Internal state of th
 
 test                                alias      user70
     test_bit0                           bit        test.1
+test2                               alias      user71
     
 
     
@@ -377,28 +439,46 @@ MAILBOX_BATT_RCV_InfoC					alias CAN16
 MAILBOX_BATT_RCV_InfoC_received			alias CAN16_received
 MAILBOX_BATT_RCV_InfoC_addr             constant 0x17C
 
+MAILBOX_BATT_RCV_Info1                  alias CAN17
+MAILBOX_BATT_RCV_Info1_received			alias CAN17_received
+MAILBOX_BATT_RCV_Info1_addr             constant 0x171
+
+MAILBOX_BATT_RCV_Info6                  alias CAN18
+MAILBOX_BATT_RCV_Info6_received			alias CAN18_received
+MAILBOX_BATT_RCV_Info6_addr             constant 0x176
+
+MAILBOX_BATT_RCV_Info8                  alias CAN19
+MAILBOX_BATT_RCV_Info8_received         alias CAN19_received
+MAILBOX_BATT_RCV_Info8_addr             constant 0x178
+
 
 ; Error CAN Messages
-MAILBOX_ERROR_MESSAGES                  alias CAN17
+MAILBOX_ERROR_MESSAGES                  alias CAN20
 MAILBOX_ERROR_MESSAGES_addr             constant 0x000
 
-MAILBOX_ERROR_MESSAGES_RCV_ACK              alias CAN18
-MAILBOX_ERROR_MESSAGES_RCV_ACK_received     alias CAN18_received
+MAILBOX_ERROR_MESSAGES_RCV_ACK              alias CAN21
+MAILBOX_ERROR_MESSAGES_RCV_ACK_received     alias CAN21_received
 MAILBOX_ERROR_MESSAGES_RCV_ACK_addr         constant 0x008
 
-MAILBOX_ERROR_MESSAGES_RCV_RM           alias CAN19
-MAILBOX_ERROR_MESSAGES_RCV_RM_received  alias CAN19_received
+MAILBOX_ERROR_MESSAGES_RCV_RM           alias CAN22
+MAILBOX_ERROR_MESSAGES_RCV_RM_received  alias CAN22_received
 MAILBOX_ERROR_MESSAGES_RCV_RM_addr      constant 0x001
 
-MAILBOX_ERROR_MESSAGES_XMT_ACK_RM       alias CAN20
+MAILBOX_ERROR_MESSAGES_XMT_ACK_RM       alias CAN23
 MAILBOX_ERROR_MESSAGES_XMT_ACK_RM_addr  constant 0x002
 
-MAILBOX_MISO_REQUEST_PARAM              alias CAN21
-MAILBOX_MISO_REQUEST_PARAM_received     alias CAN21_received
+MAILBOX_MISO_REQUEST_PARAM              alias CAN24
+MAILBOX_MISO_REQUEST_PARAM_received     alias CAN24_received
 MAILBOX_MISO_REQUEST_PARAM_addr         constant 0x112
 
-MAILBOX_MOSI_INIT_PARAM                alias CAN22
-MAILBOX_MOSI_INIT_PARAM_addr           constant 0x103
+MAILBOX_MOSI_INIT_PARAM                 alias CAN25
+MAILBOX_MOSI_INIT_PARAM_addr            constant 0x103
+
+MAILBOX_TORADEX_INFO1                   alias CAN26
+MAILBOX_TORADEX_INFO1_addr              constant 0x410
+
+MAILBOX_TORADEX_INFO2                   alias CAN27
+MAILBOX_TORADEX_INFO2_addr              constant 0x411
 
 
 ;------------------- Maps --------------------
@@ -543,6 +623,8 @@ battDrivePowerLim = BATT_DRIVE_PWR_LIM_INIT
 battRegenPowerLim = BATT_REGEN_PWR_LIM_INIT
 Battery_Power_Limit = BATT_DRIVE_PWR_LIM_INIT
 
+Neutral_Braking_TrqM = NEUTRAL_BRAKING_INIT
+
 ; For testing purposes
 rcvSteerangle = 125
 ;rcvKeySwitch = 1
@@ -574,32 +656,20 @@ mainLoop:
         reset_controller()
     }
     
-    ;test = 1
-    
     call faultHandling
     
-    ;test = 2
-    
     call checkCANMailboxes
-    
-    ;test = 3
     
     call DNRStateMachine
     
     if (lowPrioLoopDLY_output = 0) {
         
-        ;test = 4
-        
         call controlFans
-        
-        ;test = 5
     
         call calculateEfficiency
         
         setup_delay(lowPrioLoopDLY, LOW_PRIO_LOOP_RATE)
     }
-    
-    test = test +1
     
     
     goto mainLoop 
@@ -624,9 +694,6 @@ mainLoop:
 
 
 startupCANSystem:
-    
-    ;TODO: 0x410 send to toradex: temperature motor (-50 - 205), controller, Battery, Batt volt, batt current (2 byte)
-    ; 0x411: Range (0-255 km), Torque per axis (0-255 Nm)
 
    			; CAN mailboxes 1-5 are available to VCL CAN. Mailboxes 6-14 are available for CANopen
    			; C_SYNC is buddy check, C_CYCLIC is cyclic CAN messages, C_EVENT are called with send_mailbox()
@@ -651,9 +718,9 @@ startupCANSystem:
     setup_mailbox_data(MAILBOX_SM_MISO1, 6,			
         @rcvSystemAction,				
         @rcvSystemAction + USEHB,
-        @riMcMotorTempDisplay,			; Motor temperature 0-255°C
-        @riMcContrTempDisplay,     ; Controller temperature  0-255°C
-        @rcvStateGearChange,				    ; Smesh enabled
+        @riMcMotorTempDisplay,			; Motor temperature -50-205°C
+        @riMcContrTempDisplay,          ; Controller temperature  -50-205°C
+        @rcvStateGearChange,		    ; Smesh state
         @rcvRiMcFaultSystem,
         0,
         0)
@@ -758,9 +825,9 @@ startupCANSystem:
 
     setup_mailbox(MAILBOX_RDW_XMT, 0, 0, MAILBOX_RDW_XMT_addr, C_CYCLIC, C_XMT, 0, 0)
     setup_mailbox_data(MAILBOX_RDW_XMT, 5,
-        @Vehicle_Speed,				; Speed of the wheels
+        @vehicleSpeedDisplay,		; Speed of the wheels
         @leMcEfficiencyPerc,
-        @powerInDisplay,            ; TODO: send verbruik 0-150 1 decimal kW
+        @powerInDisplay,            ; Power consumption 0-150, 1 decimal [kW]
         @stateOfCharge,
         @stateDNR,			        ; Temperature errors from Batteries
         0,		                    ; Index which motor, controller and battery is the hottest (M-C)
@@ -837,13 +904,64 @@ startupCANSystem:
         
         
             ; MAILBOX 17
+   			; Purpose:		receive information: Error messages of temperature, current flow, voltage
+   			; Type:			PDO6
+   			; Partner:		Batteries
+
+    setup_mailbox(MAILBOX_BATT_RCV_Info1, 0, 0, MAILBOX_BATT_RCV_Info1_addr, C_EVENT, C_RCV, 0, 0)
+    setup_mailbox_data(MAILBOX_BATT_RCV_Info1, 8, 		
+        @rcvBattVolt,					; Voltage range 0-512V, -32767 - 32767
+        @rcvBattVolt + USEHB,
+        @rcvBattCur,                    ; Current range -1000 - 1000
+        @rcvBattCur + USEHB,
+        0,
+        0,
+        0,
+        0)
+        
+        
+            ; MAILBOX 18
+   			; Purpose:		receive information: Error messages of temperature, current flow, voltage
+   			; Type:			PDO6
+   			; Partner:		Batteries
+
+    setup_mailbox(MAILBOX_BATT_RCV_Info6, 0, 0, MAILBOX_BATT_RCV_Info6_addr, C_EVENT, C_RCV, 0, 0)
+    setup_mailbox_data(MAILBOX_BATT_RCV_Info6, 8, 		
+        @rcvBattTempBMS,					; Temperature per 1 degree C -32767 - 32767
+        @rcvBattTempBMS + USEHB,
+        @rcvBattChargeUnderTemp,            ; -128 - 127 C
+        0,
+        0,
+        @rcvBattDischargeOverTemp,          ; -128 - 127 C
+        @rcvBattTempCell1,
+        @rcvBattTempCell2)
+        
+        
+            ; MAILBOX 19
+   			; Purpose:		receive information: Error messages of temperature, current flow, voltage
+   			; Type:			PDO6
+   			; Partner:		Batteries
+
+    setup_mailbox(MAILBOX_BATT_RCV_Info8, 0, 0, MAILBOX_BATT_RCV_Info8_addr, C_EVENT, C_RCV, 0, 0)
+    setup_mailbox_data(MAILBOX_BATT_RCV_Info8, 8, 		
+        0,
+        @rcvBattCurLimCharge,               ; -512 - 512
+        @rcvBattCurLimCharge + USEHB,
+        @rcvBattCurLimDischarge,             ; -512 - 512
+        @rcvBattCurLimDischarge + USEHB,
+        @rcvBattVoltLimCharge,              ; 0 - 256
+        @rcvBattVoltLimDischarge,            ; 0 - 256
+        0)
+        
+        
+            ; MAILBOX 20
    			; Purpose:		Send information: Error messages of temperature, current flow, voltage
    			; Type:			PDO6
    			; Partner:		RDW Scherm
 
     setup_mailbox(MAILBOX_ERROR_MESSAGES, 0, 0, MAILBOX_ERROR_MESSAGES_addr, C_EVENT, C_XMT, 0, 0)
     setup_mailbox_data(MAILBOX_ERROR_MESSAGES, 3, 		
-        @FaultSystemDisplay,               ; TODO: 0,1,2 (good, worse bad)
+        @FaultSystemDisplay,               ; 0,1,2 (good, worse bad)
         @FaultSystem,
         @riMcFaultSystem,
         0,
@@ -852,7 +970,7 @@ startupCANSystem:
         0,
         0)
         
-            ; MAILBOX 18
+            ; MAILBOX 21
    			; Purpose:		receive information: Error messages of temperature, current flow, voltage
    			; Type:			PDO6
    			; Partner:		RDW Scherm
@@ -869,7 +987,7 @@ startupCANSystem:
         0)
         
         
-            ; MAILBOX 19
+            ; MAILBOX 22
    			; Purpose:		receive information: Error messages from slave controller
    			; Type:			PDO6
    			; Partner:		Slave controller
@@ -886,7 +1004,7 @@ startupCANSystem:
         0)
         
         
-            ; MAILBOX 20
+            ; MAILBOX 23
    			; Purpose:		send information: ACK to Error messages from slave controller
    			; Type:			PDO6
    			; Partner:		Slave controller
@@ -903,7 +1021,7 @@ startupCANSystem:
         0)
         
         
-            ; MAILBOX 21
+            ; MAILBOX 24
    			; Purpose:		receive information: request for init parameters
    			; Type:			MISO
    			; Partner:		Slave controller
@@ -919,7 +1037,7 @@ startupCANSystem:
         0,
         0)
         
-            ; MAILBOX 22
+            ; MAILBOX 25
    			; Purpose:		send information: Parameters at Init
    			; Type:			MOSI
    			; Partner:		Slave controller
@@ -936,8 +1054,40 @@ startupCANSystem:
         @Slave_Param_Var4 + USEHB)
         
 
+            ; MAILBOX 26
+   			; Purpose:		send information: Data for display in dashboard
+   			; Type:			
+   			; Partner:		Toradex
 
+    setup_mailbox(MAILBOX_TORADEX_INFO1, 0, 0, MAILBOX_TORADEX_INFO1_addr, C_EVENT, C_XMT, 0, 0)
+    setup_mailbox_data(MAILBOX_TORADEX_INFO1, 8, 		
+        @motorTempDisplay,
+        @riMcMotorTempDisplay,				
+        @contrTempDisplay,
+        @riMcContrTempDisplay,
+        @battTempDisplay,
+        @battVoltDisplay,
+        @battCurDisplay,
+        @battCurDisplay + USEHB)
+        
+        
+            ; MAILBOX 27
+   			; Purpose:		send information: Data for display in dashboard
+   			; Type:			
+   			; Partner:		Toradex
 
+    setup_mailbox(MAILBOX_TORADEX_INFO2, 0, 0, MAILBOX_TORADEX_INFO2_addr, C_EVENT, C_XMT, 0, 0)
+    setup_mailbox_data(MAILBOX_TORADEX_INFO2, 2, 		
+        @rangePredict,
+        @torqueDisplay,				
+        0,
+        0,
+        0,
+        0,
+        0,
+        0)
+    
+        
     CAN_set_cyclic_rate(CAN_CYCLIC_RATE)			; this sets the cyclic cycle to
     startup_CAN()					; Start the event driven mailbox;
     startup_CAN_cyclic()			; Start the cyclic mailboxes
@@ -946,11 +1096,83 @@ startupCANSystem:
 
 
 CheckCANMailboxes:
+    
+    ; Set correct variables to send
+    interlockXMT = Interlock_State
+    vehicleSpeedDisplay = map_two_points(vehicle_speed, 0, 2550, 0, 255)
+    
+    
+    if (MAILBOX_BATT_RCV_Info1_received = ON) {
+        MAILBOX_BATT_RCV_Info1_received = OFF
+        
+        battVoltDisplay = map_two_points(rcvBattVolt, 0, 32767, 0, 256)            ; [V] ; Voltage range 0-512V, -32767 - 32767
+        battCurDisplay = map_two_points(rcvBattCur, -32767, 32767, -1024, 1024)     ; [A] ; Current range -1000 - 1000, -32767 - 32767
+        
+        battVoltDeci = map_two_points(rcvBattVolt, 0, 32767, 0, 2560)
+        battCurDeci = map_two_points(rcvBattCur, -32767, 32767, -10240, 10240)
+    }
+    
+    if (MAILBOX_BATT_RCV_Info6_received = ON) {
+        MAILBOX_BATT_RCV_Info6_received = OFF
+        
+        ; Margin on Temp
+        if ( (battDischargeOverTempPrev <> rcvBattDischargeOverTemp) | (battChargeUnderTempPrev <> rcvBattChargeUnderTemp) ) {
+            battDischargeOverTempMargin = get_muldiv(MTD1, rcvBattDischargeOverTemp, BATT_TEMP_FAULT_MARGIN, 100)
+            battChargeUnderTempMargin = get_muldiv(MTD2, rcvBattChargeUnderTemp, BATT_TEMP_FAULT_MARGIN, 100)
+            
+            battDischargeOverTempPrev = rcvBattDischargeOverTemp
+            battChargeUnderTempPrev = rcvBattChargeUnderTemp
+        }
+        
+        if ( (rcvBattTempBMS > rcvBattTempCell1) & (rcvBattTempBMS > rcvBattTempCell2) ) {
+            battTempDisplay = map_two_points(rcvBattTempBMS, -50, 205, 0, 255)
+        } else if (rcvBattTempCell1 > rcvBattTempCell2) {
+            battTempDisplay = map_two_points(rcvBattTempCell1, -50, 205, 0, 255)
+        } else {
+            battTempDisplay = map_two_points(rcvBattTempCell2, -50, 205, 0, 255)
+        }
+        
+    }
+    
+    if (MAILBOX_BATT_RCV_Info8_received = ON) {
+        MAILBOX_BATT_RCV_Info8_received = OFF
+        
+        if ( (battCurLimChargePrev <> rcvBattCurLimCharge) | (battVoltLimChargePrev <> rcvBattVoltLimCharge) | (battCurLimDischargePrev <> rcvBattCurLimDischarge) | (battVoltLimDischargePrev <> rcvBattVoltLimDischarge) ) {
+            
+            battCurLimChargeDeci = map_two_points(rcvBattCurLimCharge, -32767, 32767, -5120, 5120) ; -512 - 512, -32767, 32767
+            battCurLimDischargeDeci = map_two_points(rcvBattCurLimDischarge, -32767, 32767, -5120, 5120)
+            
+            battVoltLimChargeDeci = rcvBattVoltLimCharge*10
+            battVoltLimDischargeDeci = rcvBattVoltLimDischarge*10
+            
+            
+            battCurLimChargeMargin = get_muldiv(MTD1, battCurLimChargeDeci, BATT_CUR_LIM_FAULT_MARGIN, 100)
+            battVoltLimChargeMargin = get_muldiv(MTD2, battVoltLimChargeDeci, BATT_VOLT_LIM_FAULT_MARGIN, 100)
+            
+            battCurLimDischargeMargin = get_muldiv(MTD3, battCurLimDischargeDeci, BATT_CUR_LIM_FAULT_MARGIN, 100)
+            battVoltLimDischargeMargin = get_muldiv(MTD1, battVoltLimDischargeDeci, BATT_VOLT_LIM_FAULT_MARGIN, 100)
+            
+            battCurLimChargePrev = rcvBattCurLimCharge
+            battVoltLimChargePrev = rcvBattVoltLimCharge
+            battCurLimDischargePrev = rcvBattCurLimDischarge
+            battVoltLimDischargePrev = rcvBattVoltLimDischarge
+        }
+        
+    }
+    
+    
 
     ;send low priority mailboxes
     
     if (lowPrioMailboxDLY_output = 0) {
+        ; call rangePrediction
+        
+        torqueDisplay = map_two_points(motor_torque, 0, 2550, 0, 255)          ; 1 decimal [Nm]
+        
         send_mailbox(MAILBOX_ERROR_MESSAGES)
+        
+        send_mailbox(MAILBOX_TORADEX_INFO1)
+        send_mailbox(MAILBOX_TORADEX_INFO2)
         
         setup_delay(lowPrioMailboxDLY, CAN_LOWPRIORITY_RATE)
     }
@@ -965,7 +1187,7 @@ CheckCANMailboxes:
         
     }
     
-    interlockXMT = Interlock_State
+    
     
     
     ; Request from slave to send parameters
@@ -1003,8 +1225,6 @@ CheckCANMailboxes:
         
     }
     
-    ; TODO: vehicle_speed int 1 byte
-    
 
     return
     
@@ -1020,11 +1240,13 @@ retrieveErrors:
         tempCritError = ON
     }
     
-	if ( (battChargeTempHigh = OFF) & (battDischargeTempHigh = OFF) ) {
+	if ( (battChargeTempHigh = OFF) & (battDischargeTempHigh = OFF) & ((battTempDisplay-50) < battDischargeOverTempMargin) & ((battTempDisplay-50) > battChargeUnderTempMargin) ) {
         tempFault = OFF  
     } else {
         tempFault = ON
     }
+    
+    ; TO DO: Check whether rcvBattCurLimCharge is positive or not
     
 	if ( (battChargeCurAlarm = OFF) & (battOvervoltageAlarm = OFF) ) {
         regenCritError = OFF
@@ -1037,6 +1259,8 @@ retrieveErrors:
     } else {
         regenFault = ON
     }
+    
+    
     
 	if ( (battDischargeCurAlarm = OFF) & (battDischargeUndervoltage = OFF) ) {
         driveCritError = OFF
@@ -1064,11 +1288,11 @@ retrieveErrors:
     
     
     if (rcvSystemAction <> 0) {
-        FaultSystemDisplay = 3
+        FaultSystemDisplay = 2
         
         System_Action = rcvSystemAction
     } else if (System_Action <> 0) {
-        FaultSystemDisplay = 3
+        FaultSystemDisplay = 2
     }
     
     riMcFaultSystem = rcvRiMcFaultSystem
@@ -1130,43 +1354,100 @@ faultHandling:
     
     if ( (FaultSystem = 0) & (riMcFaultSystem = 0) & (LOSActive = 1) ) {
         ; When there are no faults, set current limits normally
-        ; When gear change is busy, don't set limits normally
-        
-        FaultSystemDisplay = 0
         
         set_ramp_target(driveFaultRMP, 0)          ; Target is 0ms
         
         set_ramp_target(regenFaultRMP, 0)          ; Target is 0ms
         
-        LOSActive = 0
+        
     }
     
     
     ; Drive limiting
+    ; Based on Battery data
+    if ( (battCurDeci > battCurLimDischargeMargin) & (battVoltDeci > battVoltLimDischargeMargin) ) {
+        
+        battDrivePowerLimTemp1 = BATT_DRIVE_PWR_LIM_INIT
+        
+    } else {
+        battDrivePowerLimTemp1 = map_two_points(battCurDeci, battCurLimDischargeMargin, battCurLimDischargeDeci, BATT_DRIVE_PWR_LIM_INIT, BATTERY_DRIVE_POWER_LIMIT_MIN)
+        
+        battDrivePowerLimTemp2 = map_two_points(battVoltDeci, battVoltLimDischargeMargin, battVoltLimDischargeDeci, BATT_DRIVE_PWR_LIM_INIT, BATTERY_DRIVE_POWER_LIMIT_MIN)
+        
+        if (battDrivePowerLimTemp2 < battDrivePowerLimTemp1) {
+            battDrivePowerLimTemp1 = battDrivePowerLimTemp2
+        }
+        
+        LOSActive = 1
+        
+        FaultSystemDisplay = 1
+    }
+    
+    ; Based on other faults
     if (driveFaultRMP_output = 0) {
         ; When there are no limitations, just use initial power limit
-        battDrivePowerLim = BATT_DRIVE_PWR_LIM_INIT
+        battDrivePowerLimTemp2 = BATT_DRIVE_PWR_LIM_INIT
     } else {
         mapOutputTemp1 = map_two_points(driveFaultRMP_output, 0, TIME_TO_FULL_LOS_FAULT, 100, REDUCED_DRIVE_INPUT_CURLIM_PERC)
 
-        battDrivePowerLim = map_two_points(mapOutputTemp1, 0, 100, BATTERY_DRIVE_POWER_LIMIT_MIN, BATT_DRIVE_PWR_LIM_INIT)
+        battDrivePowerLimTemp2 = map_two_points(mapOutputTemp1, 0, 100, BATTERY_DRIVE_POWER_LIMIT_MIN, BATT_DRIVE_PWR_LIM_INIT)
     }
+    
+    ; Choose lowest limit
+    if (battDrivePowerLimTemp1 < battDrivePowerLimTemp2) {
+        battDrivePowerLim = battDrivePowerLimTemp1
+    } else {
+        battDrivePowerLim = battDrivePowerLimTemp2
+    }
+    
     riMcBattDrivePowerLim = battDrivePowerLim
     
     
+    
+    
     ; Regen limiting
+    ; Based on Battery data
+    if ( (battCurDeci < battCurLimChargeMargin) & (battVoltDeci < battVoltLimChargeMargin) ) {
+        
+        battRegenPowerLimTemp1 = BATT_REGEN_PWR_LIM_INIT
+        
+    } else {
+        battRegenPowerLimTemp1 = map_two_points(battCurDeci, battCurLimChargeMargin, battCurLimChargeDeci, BATT_REGEN_PWR_LIM_INIT, BATTERY_REGEN_POWER_LIMIT_MIN)
+        
+        battRegenPowerLimTemp2 = map_two_points(battVoltDeci, battVoltLimChargeMargin, battVoltLimChargeDeci, BATT_REGEN_PWR_LIM_INIT, BATTERY_REGEN_POWER_LIMIT_MIN)
+        
+        if (battRegenPowerLimTemp2 < battRegenPowerLimTemp1) {
+            battRegenPowerLimTemp1 = battRegenPowerLimTemp2
+        }
+        
+        LOSActive = 1
+        
+        FaultSystemDisplay = 1
+    }
+    
+    ; Based on other faults
     if (regenFaultRMP_output = 0) {
-        battRegenPowerLim = BATT_REGEN_PWR_LIM_INIT
+        battRegenPowerLimTemp2 = BATT_REGEN_PWR_LIM_INIT
     } else {
         mapOutputTemp1 = map_two_points(regenFaultRMP_output, 0, TIME_TO_FULL_LOS_FAULT, 100, REDUCED_REGEN_INPUT_CURLIM_PERC)
         
-        battRegenPowerLim = map_two_points(mapOutputTemp1, 0, 100, BATTERY_REGEN_POWER_LIMIT_MIN, BATT_REGEN_PWR_LIM_INIT)
+        battRegenPowerLimTemp2 = map_two_points(mapOutputTemp1, 0, 100, BATTERY_REGEN_POWER_LIMIT_MIN, BATT_REGEN_PWR_LIM_INIT)
     }
+    
+    ; Choose lowest limit
+    if (battRegenPowerLimTemp1 < battRegenPowerLimTemp2) {
+        battRegenPowerLim = battRegenPowerLimTemp1
+    } else {
+        battRegenPowerLim = battRegenPowerLimTemp2
+    }
+    
     riMcBattRegenPowerLim = battRegenPowerLim
     
     
+    
     ; Control Power Limiting
-    if (Regen_State = OFF) {
+    test_bit0 = Regen_State
+    if (battCurDeci < 0) {
         ; Motors are consuming current
         Battery_Power_Limit = battDrivePowerLim
         
@@ -1174,6 +1455,13 @@ faultHandling:
         ; Motors are producing current
         Battery_Power_Limit = battRegenPowerLim
         
+    }
+    
+    if ( (battDrivePowerLim = BATT_DRIVE_PWR_LIM_INIT) & (battRegenPowerLim = BATT_REGEN_PWR_LIM_INIT) & (LOSActive = 1) ) {
+        ; When current limits are normal, inform RDW Scherm and disable LOS
+        LOSActive = 0
+        
+        FaultSystemDisplay = 0
     }
     
     
@@ -1245,7 +1533,7 @@ setup2DMap:
     
 controlFans:
     
-    motorTempDisplay = map_two_points(motor_temperature, 0, 2550, 0, 255)
+    motorTempDisplay = map_two_points(motor_temperature, -500, 2050, 0, 255)
     
     if (motorTempDisplay > riMcMotorTempDisplay) {
         motorTempDisplayHighest = motorTempDisplay
@@ -1268,7 +1556,7 @@ controlFans:
     
     
     
-    contrTempDisplay = map_two_points(controller_temperature, 0, 2550, 0, 255)
+    contrTempDisplay = map_two_points(motor_temperature, -500, 2050, 0, 255)
     
     if (contrTempDisplay > riMcContrTempDisplay) {
         contrTempDisplayHighest = contrTempDisplay

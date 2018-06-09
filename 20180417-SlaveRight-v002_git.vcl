@@ -54,9 +54,6 @@ VCL_App_Ver = 011
 ; Input Current Limits
 Battery_Current_Limit_Ramp_Rate = 1
 Battery_Current_Limiter_enable = 1
-Battery_Power_Limit = 20                ; per 10W
-;; Regen_Battery_Current_Limit
-;; Motor_Power
 
 RESET_PASSWORD                  constant 141        ; password for "resetControllerRemote" to reset controller
 
@@ -740,8 +737,8 @@ DNR_statemachine:
     
 calculateTemperature:
     
-    motorTemperatureDisplay = map_two_points(Motor_Temperature, 0, 2550, 0, 255)
-    contrTemperatureDisplay = map_two_points(Controller_Temperature, 0, 2550, 0, 255)
+    motorTemperatureDisplay = map_two_points(motor_temperature, -500, 2050, 0, 255)
+    contrTemperatureDisplay = map_two_points(controller_temperature, -500, 2050, 0, 255)
     
     return
     
