@@ -53,7 +53,6 @@ VCL_App_Ver = 012
 
 
 ; TO DO:
-; Predict range
 
 ; TEST:
 ; current cutbacks
@@ -186,10 +185,6 @@ create rcvSystemAction variable
 
 create HPO variable
 
-;-------- Range prediction ---------
-
-create rangePredict variable
-
 ;-------------- CAN ---------------
 
 create riMcFaultSystemACK variable
@@ -237,6 +232,12 @@ create motorTempDisplayHighest variable
 
 create startStopInit variable
 create startStopActive variable
+
+;-------------- Position Hold ---------------
+
+create rotorPositionNormalized variable
+create rotorPositionNormalizeFactor variable
+create rotorPositionSetpoint variable
 
 ;-------------- Batteries ---------------
 
@@ -1077,9 +1078,9 @@ startupCANSystem:
    			; Partner:		Toradex
 
     setup_mailbox(MAILBOX_TORADEX_INFO2, 0, 0, MAILBOX_TORADEX_INFO2_addr, C_EVENT, C_XMT, 0, 0)
-    setup_mailbox_data(MAILBOX_TORADEX_INFO2, 2, 		
-        @rangePredict,
+    setup_mailbox_data(MAILBOX_TORADEX_INFO2, 1,
         @torqueDisplay,				
+        0,
         0,
         0,
         0,
@@ -1644,10 +1645,36 @@ DNRStateMachine:
             if ((startStopInit = 0)) {
                 setup_delay(startStopDLY, TIME_TO_START_STOP)
                 startStopInit = 1
+                
+                ; rotor_position_raw 0 - 4095, 0 - 360
+                rotorPositionNormalizeFactor = 2050 - rotor_position_raw
+                calculationTemp1 = rotor_position_raw + rotorPositionNormalizeFactor
+                
+                if (calculationTemp1 > 4095) {
+                    rotorPositionNormalized = calculationTemp1 - 4095
+                } else if (calculationTemp1 < 0) {
+                    rotorPositionNormalized = calculationTemp1 + 4095
+                } else {
+                    rotorPositionNormalized = calculationTemp1
+                }
+                
+                rotorPositionSetpoint = 2050
+                
+                ;automate_PID(PID1, rotorPositionSetpoint, rotorPositionNormalized, 2050, 0, 1, 1, 50)
             } else if ((startStopDLY_output = 0) & (startStopActive <> 1) ) {
                 ; timer is over, so engage Start Stop
                 clear_interlock()
                 startStopActive = 1
+            }
+            
+            calculationTemp1 = rotor_position_raw + rotorPositionNormalizeFactor
+            
+            if (calculationTemp1 > 4095) {
+                rotorPositionNormalized = calculationTemp1 - 4095
+            } else if (calculationTemp1 < 0) {
+                rotorPositionNormalized = calculationTemp1 + 4095
+            } else {
+                rotorPositionNormalized = calculationTemp1
             }
         } else {
             startStopInit = 0
