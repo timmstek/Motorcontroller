@@ -131,10 +131,11 @@ BATT_VOLT_LIM_FAULT_MARGIN      constant    95
 BATT_TEMP_FAULT_MARGIN          constant    90
 
 ; DNR, Gear change and steering settings
-GEAR_CHANGE_BEFORE_DELAY        constant    2000
-GEAR_CHANGE_AFTER_DELAY         constant    500
+GEAR_CHANGE_BEFORE_DELAY        constant    400
+GEAR_CHANGE_AFTER_DELAY         constant    100
 PROTECTION_DELAY_GRCHANGE       constant    5000    ; Allowed to only change gear once per second, in ms
-THROTTLE_MULTIP_REDUCE          constant    26      ; 26/128 = 0.2 multiplier for reducing throttle during gear change
+THROTTLE_MULTIP_REDUCE          constant    1      ; 26/128 = 0.2 multiplier for reducing throttle during gear change
+THROTTLE_MULTIP_INCREASE        constant    192     ; 192/128 = 1.5 multiplier for increasing throttle during gear change
 MAX_SPEED_CHANGE_DNR            constant    50      ; in km/h, with 1 decimal
 MINIMUM_SPEED_GEAR16            constant    50       ; minimum vehicle speed for gear 1:6, with 1 decimal
 
@@ -186,10 +187,6 @@ create rcvSystemAction variable
 
 create HPO variable
 
-;-------- Range prediction ---------
-
-create rangePredict variable
-
 ;-------------- CAN ---------------
 
 create riMcFaultSystemACK variable
@@ -206,6 +203,7 @@ create torqueDisplay variable
 create rcvRequestSlaveParam variable
 
 create XMT_BATT_DRIVE_PWR_LIM_INIT variable
+create NEUTRAL_BRAKING_INIT_VARIABLE variable
 
 create Slave_Param_Var1 variable
 create Slave_Param_Var2 variable
@@ -624,6 +622,7 @@ battRegenPowerLim = BATT_REGEN_PWR_LIM_INIT
 Battery_Power_Limit = BATT_DRIVE_PWR_LIM_INIT
 
 Neutral_Braking_TrqM = NEUTRAL_BRAKING_INIT
+NEUTRAL_BRAKING_INIT_VARIABLE = NEUTRAL_BRAKING_INIT
 
 ; For testing purposes
 rcvSteerangle = 125
@@ -772,13 +771,13 @@ startupCANSystem:
             
     setup_mailbox(MAILBOX_SM_MOSI3, 0, 0, MAILBOX_SM_MOSI3_addr, C_EVENT, C_XMT, 0, 0)
 
-    setup_mailbox_data(MAILBOX_SM_MOSI3, 4, 		
+    setup_mailbox_data(MAILBOX_SM_MOSI3, 6, 		
         @riMcThrottleComp,			
         @riMcThrottleComp + USEHB,
         @stateGearChange,				
         @resetControllerRemote, 
-        0,
-		0,
+        @riMcBattDrivePowerLim,						; Set max speed
+        @riMcBattDrivePowerLim + USEHB,
         0,
         0)
             
@@ -1077,9 +1076,9 @@ startupCANSystem:
    			; Partner:		Toradex
 
     setup_mailbox(MAILBOX_TORADEX_INFO2, 0, 0, MAILBOX_TORADEX_INFO2_addr, C_EVENT, C_XMT, 0, 0)
-    setup_mailbox_data(MAILBOX_TORADEX_INFO2, 2, 		
-        @rangePredict,
+    setup_mailbox_data(MAILBOX_TORADEX_INFO2, 1,
         @torqueDisplay,				
+        0,
         0,
         0,
         0,
@@ -1394,13 +1393,14 @@ faultHandling:
     }
     
     ; Choose lowest limit
-    if (battDrivePowerLimTemp1 < battDrivePowerLimTemp2) {
-        battDrivePowerLim = battDrivePowerLimTemp1
-    } else {
-        battDrivePowerLim = battDrivePowerLimTemp2
+    if (battDrivePowerLimTemp1 > battDrivePowerLimTemp2) {
+        battDrivePowerLimTemp1 = battDrivePowerLimTemp2
     }
     
-    riMcBattDrivePowerLim = battDrivePowerLim
+    if (stateGearChange < 0x60) {
+        battDrivePowerLim = battDrivePowerLimTemp1
+        riMcBattDrivePowerLim = battDrivePowerLimTemp1
+    }
     
     
     
@@ -1445,9 +1445,10 @@ faultHandling:
     
     
     
+    
     ; Control Power Limiting
     test_bit0 = Regen_State
-    if (battCurDeci < 0) {
+    if ( (battCurDeci < 0) ) {
         ; Motors are consuming current
         Battery_Power_Limit = battDrivePowerLim
         
@@ -1707,6 +1708,7 @@ DNRStateMachine:
             }
         } else if (stateGearChange = 0xFF) {
             faultCNTGearChange = faultCNTGearChange + 1
+            Neutral_Braking_TrqM = NEUTRAL_BRAKING_INIT
             stateGearChange = 0x60
             
         }
@@ -1732,6 +1734,7 @@ DNRStateMachine:
             }
         } else if (stateGearChange = 0xFF) {
             faultCNTGearChange = faultCNTGearChange + 1
+            Neutral_Braking_TrqM = NEUTRAL_BRAKING_INIT
             stateGearChange = 0x80
             
         }
@@ -1951,6 +1954,7 @@ DNRStateMachine:
     }
     
     if (faultCNTGearChange > 3) {
+        faultCNTGearChange = 0
         stateDNR = PRE_NEUTRAL
         stateGearChange = 0x01
     }
@@ -2004,7 +2008,10 @@ DNRStateMachine:
     
     
 setSmeshTo16Simple:
-
+    
+    
+    ;;;;; 0. Check whether 1:6 gear is already engaged
+    
     if ( (stateGearChange = 0x60) & (SMESH_LEFT_PIN_OUTPUT = OFF) & (SMESH_RIGHT_PIN_OUTPUT = OFF) ) {
         ; Smesh is already in 1:18 mode (16 OFF(clear); 118 ON(set))
         ; So directly go to the end of the functions
@@ -2014,21 +2021,31 @@ setSmeshTo16Simple:
         setup_delay(smeshDLY, CAN_DELAY_FOR_ACK)
     }
     
+    
+    ;;;;; 1. Reduce left throttle, increase right throttle
+    
     if ((stateGearChange = 0x60)) {
-        mapOutputTemp1 = get_muldiv(MTD1, rcvThrottle, THROTTLE_MULTIP_REDUCE, 128)
-        leMcThrottleTemp = map_two_points(mapOutputTemp1, 0, 255, 0, 32767)
-        riMcThrottleTemp = map_two_points(rcvThrottle, 0, 255, 0, 32767)
+        
+        riMcBattDrivePowerLim = get_muldiv(MTD1, battDrivePowerLimTemp1, THROTTLE_MULTIP_INCREASE, 128)
+        battDrivePowerLim = get_muldiv(MTD2, battDrivePowerLimTemp1, THROTTLE_MULTIP_REDUCE, 128)
+        
+        Neutral_Braking_TrqM = 0
         
         stateGearChange = 0x61
         
+        send_mailbox(MAILBOX_SM_MOSI3)
         setup_delay(gearChangeDLY, GEAR_CHANGE_BEFORE_DELAY)
     }
+    
+    
+    ;;;;; 2. Wait before left gear can be changed
     
     if (stateGearChange = 0x61) {
         
         mapOutputTemp1 = get_muldiv(MTD1, rcvThrottle, THROTTLE_MULTIP_REDUCE, 128)
         leMcThrottleTemp = map_two_points(mapOutputTemp1, 0, 255, 0, 32767)
-        riMcThrottleTemp = map_two_points(rcvThrottle, 0, 255, 0, 32767)
+        mapOutputTemp1 = get_muldiv(MTD2, rcvThrottle, THROTTLE_MULTIP_INCREASE, 128)
+        riMcThrottleTemp = map_two_points(mapOutputTemp1, 0, 255, 0, 32767)
         
         if (gearChangeDLY_output = 0) {
             stateGearChange = 0x62
@@ -2036,8 +2053,11 @@ setSmeshTo16Simple:
         
     }
     
+    
+    ;;;;; 3. Change left smesh
+    
     if (stateGearChange = 0x62) {
-        ; 16 OFF(clear); 118 ON(set) ; & (gearChangeDLY_output = 0) 
+        ; 16 OFF(clear); 118 ON(set)
         clear_DigOut(SMESH_LEFT_PIN)                          ; Change gear
         
         setup_delay(gearChangeDLY, GEAR_CHANGE_AFTER_DELAY)
@@ -2045,11 +2065,14 @@ setSmeshTo16Simple:
         stateGearChange = 0x63
     }
     
+    ;;;;; 4. Wait until throttle can be applied again
+    
     if (stateGearChange = 0x63) {
         
         mapOutputTemp1 = get_muldiv(MTD1, rcvThrottle, THROTTLE_MULTIP_REDUCE, 128)
         leMcThrottleTemp = map_two_points(mapOutputTemp1, 0, 255, 0, 32767)
-        riMcThrottleTemp = map_two_points(rcvThrottle, 0, 255, 0, 32767)
+        mapOutputTemp1 = get_muldiv(MTD2, rcvThrottle, THROTTLE_MULTIP_INCREASE, 128)
+        riMcThrottleTemp = map_two_points(mapOutputTemp1, 0, 255, 0, 32767)
         
         if (gearChangeDLY_output = 0) {
             stateGearChange = 0x64
@@ -2057,51 +2080,122 @@ setSmeshTo16Simple:
         
     }
     
+    
+    ;;;;; 5. Reduce right throttle
+    
     if ((stateGearChange = 0x64)) {
-        mapOutputTemp1 = get_muldiv(MTD1, rcvThrottle, THROTTLE_MULTIP_REDUCE, 128)
+        riMcBattDrivePowerLim = get_muldiv(MTD1, battDrivePowerLimTemp1, THROTTLE_MULTIP_REDUCE, 128)
+        
+        mapOutputTemp1 = get_muldiv(MTD2, rcvThrottle, THROTTLE_MULTIP_REDUCE, 128)
         riMcThrottleTemp = map_two_points(mapOutputTemp1, 0, 255, 0, 32767)
-        leMcThrottleTemp = map_two_points(rcvThrottle, 0, 255, 0, 32767)
+        mapOutputTemp1 = get_muldiv(MTD3, rcvThrottle, THROTTLE_MULTIP_REDUCE, 128)
+        leMcThrottleTemp = map_two_points(mapOutputTemp1, 0, 255, 0, 32767)
         
         stateGearChange = 0x65
+        
+        send_mailbox(MAILBOX_SM_MOSI3)
+        setup_delay(smeshDLY, CAN_DELAY_FOR_ACK)
+    }
+    
+    
+    ;;;;; 6. Receive ACK: Throttle has been reduced
+    
+    if ((stateGearChange = 0x65)) {
+        mapOutputTemp1 = get_muldiv(MTD1, rcvThrottle, THROTTLE_MULTIP_REDUCE, 128)
+        riMcThrottleTemp = map_two_points(mapOutputTemp1, 0, 255, 0, 32767)
+        mapOutputTemp1 = get_muldiv(MTD2, rcvThrottle, THROTTLE_MULTIP_REDUCE, 128)
+        leMcThrottleTemp = map_two_points(mapOutputTemp1, 0, 255, 0, 32767)
+        
+        if ( (rcvStateGearChange = 0x66) ) {
+            ; Right controller has changed throttle
+            stateGearChange = 0x66
+        } else if (smeshDLY_output = 0) {
+            ; It takes too much time to change gear
+            stateGearChange = 0xFF
+            
+        }
+    }
+    
+    
+    ;;;;; 7. Increase left throttle
+    
+    if ((stateGearChange = 0x66)) {
+        
+        battDrivePowerLim = get_muldiv(MTD1, battDrivePowerLimTemp1, THROTTLE_MULTIP_INCREASE, 128)
+        
+        Neutral_Braking_TrqM = NEUTRAL_BRAKING_INIT
+        
+        stateGearChange = 0x67
         
         setup_delay(gearChangeDLY, GEAR_CHANGE_BEFORE_DELAY)
     }
     
-    if (stateGearChange = 0x65) {
+    
+    ;;;;; 8. Wait before changing gear
+    
+    if (stateGearChange = 0x67) {
         mapOutputTemp1 = get_muldiv(MTD1, rcvThrottle, THROTTLE_MULTIP_REDUCE, 128)
         riMcThrottleTemp = map_two_points(mapOutputTemp1, 0, 255, 0, 32767)
-        leMcThrottleTemp = map_two_points(rcvThrottle, 0, 255, 0, 32767)
+        mapOutputTemp1 = get_muldiv(MTD2, rcvThrottle, THROTTLE_MULTIP_INCREASE, 128)
+        leMcThrottleTemp = map_two_points(mapOutputTemp1, 0, 255, 0, 32767)
         
         if (gearChangeDLY_output = 0) {
-            stateGearChange = 0x66
+            stateGearChange = 0x68
         }
         
     }
     
-    if (stateGearChange = 0x66) {
+    
+    ;;;;; 9. Change right gear
+    
+    if (stateGearChange = 0x68) {
         ; 16 OFF(clear); 118 ON(set) ; & (gearChangeDLY_output = 0) 
         clear_DigOut(SMESH_RIGHT_PIN)                          ; Change gear
         
         setup_delay(gearChangeDLY, GEAR_CHANGE_AFTER_DELAY)
         
-        stateGearChange = 0x67
+        stateGearChange = 0x69
     }
     
-    if (stateGearChange = 0x67) {
+    
+    ;;;;; 10. Wait after gear change
+    
+    if (stateGearChange = 0x69) {
         mapOutputTemp1 = get_muldiv(MTD1, rcvThrottle, THROTTLE_MULTIP_REDUCE, 128)
         riMcThrottleTemp = map_two_points(mapOutputTemp1, 0, 255, 0, 32767)
-        leMcThrottleTemp = map_two_points(rcvThrottle, 0, 255, 0, 32767)
+        mapOutputTemp1 = get_muldiv(MTD2, rcvThrottle, THROTTLE_MULTIP_INCREASE, 128)
+        leMcThrottleTemp = map_two_points(mapOutputTemp1, 0, 255, 0, 32767)
         
         if (gearChangeDLY_output = 0) {
-            stateGearChange = 0x6B
+            stateGearChange = 0x6A
             
-            send_mailbox(MAILBOX_SM_MOSI3)
-            setup_delay(smeshDLY, CAN_DELAY_FOR_ACK)
         }
         
     }
     
+    
+    ;;;;; 11. Normalize throttle
+    
+    if (stateGearChange = 0x6A) {
+        riMcBattDrivePowerLim = battDrivePowerLimTemp1
+        battDrivePowerLim = battDrivePowerLimTemp1
+        
+        riMcThrottleTemp = map_two_points(rcvThrottle, 0, 255, 0, 32767)
+        leMcThrottleTemp = map_two_points(rcvThrottle, 0, 255, 0, 32767)
+        
+        stateGearChange = 0x6B
+        
+        send_mailbox(MAILBOX_SM_MOSI3)
+        setup_delay(smeshDLY, CAN_DELAY_FOR_ACK)
+    }
+    
+    
+    
+    
+    ;;;;; 12. Normalize throttle and wait for ACK slave: procedure is finished
+    
     if (stateGearChange = 0x6B) {
+        
         riMcThrottleTemp = map_two_points(rcvThrottle, 0, 255, 0, 32767)
         leMcThrottleTemp = map_two_points(rcvThrottle, 0, 255, 0, 32767)
         
@@ -2114,7 +2208,10 @@ setSmeshTo16Simple:
             
         }
     }
-        
+    
+    
+    ;;;;; 13. Gear change is succesful
+    
     if (stateGearChange = 0x6C) {
         riMcThrottleTemp = map_two_points(rcvThrottle, 0, 255, 0, 32767)
         leMcThrottleTemp = map_two_points(rcvThrottle, 0, 255, 0, 32767)
@@ -2130,8 +2227,13 @@ setSmeshTo16Simple:
     }
     
     return
+    
+    
 
 setSmeshTo118Simple:
+    
+    
+    ;;;;; 0. Check whether 1:18 gear is already engaged
     
     if ( (stateGearChange = 0x80) & (SMESH_LEFT_PIN_OUTPUT = ON) & (SMESH_RIGHT_PIN_OUTPUT = ON) ) {
         ; Smesh is already in 1:18 mode (16 OFF(clear); 118 ON(set))
@@ -2142,21 +2244,31 @@ setSmeshTo118Simple:
         setup_delay(smeshDLY, CAN_DELAY_FOR_ACK)
     }
     
+    
+    ;;;;; 1. Reduce left throttle, increase right throttle
+    
     if ((stateGearChange = 0x80)) {
-        mapOutputTemp1 = get_muldiv(MTD1, rcvThrottle, THROTTLE_MULTIP_REDUCE, 128)
-        leMcThrottleTemp = map_two_points(mapOutputTemp1, 0, 255, 0, 32767)
-        riMcThrottleTemp = map_two_points(rcvThrottle, 0, 255, 0, 32767)
+        
+        riMcBattDrivePowerLim = get_muldiv(MTD1, battDrivePowerLimTemp1, THROTTLE_MULTIP_INCREASE, 128)
+        battDrivePowerLim = get_muldiv(MTD2, battDrivePowerLimTemp1, THROTTLE_MULTIP_REDUCE, 128)
+        
+        Neutral_Braking_TrqM = 0
         
         stateGearChange = 0x81
         
+        send_mailbox(MAILBOX_SM_MOSI3)
         setup_delay(gearChangeDLY, GEAR_CHANGE_BEFORE_DELAY)
     }
+    
+    
+    ;;;;; 2. Wait before left gear can be changed
     
     if (stateGearChange = 0x81) {
         
         mapOutputTemp1 = get_muldiv(MTD1, rcvThrottle, THROTTLE_MULTIP_REDUCE, 128)
         leMcThrottleTemp = map_two_points(mapOutputTemp1, 0, 255, 0, 32767)
-        riMcThrottleTemp = map_two_points(rcvThrottle, 0, 255, 0, 32767)
+        mapOutputTemp1 = get_muldiv(MTD2, rcvThrottle, THROTTLE_MULTIP_INCREASE, 128)
+        riMcThrottleTemp = map_two_points(mapOutputTemp1, 0, 255, 0, 32767)
         
         if (gearChangeDLY_output = 0) {
             stateGearChange = 0x82
@@ -2164,20 +2276,26 @@ setSmeshTo118Simple:
         
     }
     
+    
+    ;;;;; 3. Change left smesh
+    
     if (stateGearChange = 0x82) {
-        ; 16 OFF(clear); 118 ON(set) ; & (gearChangeDLY_output = 0) 
-        set_DigOut(SMESH_LEFT_PIN)                          ; Change gear
+        ; 16 OFF(clear); 118 ON(set)
+        set_digout(SMESH_LEFT_PIN)                          ; Change gear
         
         setup_delay(gearChangeDLY, GEAR_CHANGE_AFTER_DELAY)
         
         stateGearChange = 0x83
     }
     
+    ;;;;; 4. Wait until throttle can be applied again
+    
     if (stateGearChange = 0x83) {
         
         mapOutputTemp1 = get_muldiv(MTD1, rcvThrottle, THROTTLE_MULTIP_REDUCE, 128)
         leMcThrottleTemp = map_two_points(mapOutputTemp1, 0, 255, 0, 32767)
-        riMcThrottleTemp = map_two_points(rcvThrottle, 0, 255, 0, 32767)
+        mapOutputTemp1 = get_muldiv(MTD2, rcvThrottle, THROTTLE_MULTIP_INCREASE, 128)
+        riMcThrottleTemp = map_two_points(mapOutputTemp1, 0, 255, 0, 32767)
         
         if (gearChangeDLY_output = 0) {
             stateGearChange = 0x84
@@ -2185,51 +2303,122 @@ setSmeshTo118Simple:
         
     }
     
+    
+    ;;;;; 5. Reduce right throttle
+    
     if ((stateGearChange = 0x84)) {
-        mapOutputTemp1 = get_muldiv(MTD1, rcvThrottle, THROTTLE_MULTIP_REDUCE, 128)
+        riMcBattDrivePowerLim = get_muldiv(MTD1, battDrivePowerLimTemp1, THROTTLE_MULTIP_REDUCE, 128)
+        
+        mapOutputTemp1 = get_muldiv(MTD2, rcvThrottle, THROTTLE_MULTIP_REDUCE, 128)
         riMcThrottleTemp = map_two_points(mapOutputTemp1, 0, 255, 0, 32767)
-        leMcThrottleTemp = map_two_points(rcvThrottle, 0, 255, 0, 32767)
+        mapOutputTemp1 = get_muldiv(MTD3, rcvThrottle, THROTTLE_MULTIP_REDUCE, 128)
+        leMcThrottleTemp = map_two_points(mapOutputTemp1, 0, 255, 0, 32767)
         
         stateGearChange = 0x85
+        
+        send_mailbox(MAILBOX_SM_MOSI3)
+        setup_delay(smeshDLY, CAN_DELAY_FOR_ACK)
+    }
+    
+    
+    ;;;;; 6. Receive ACK: Throttle has been reduced
+    
+    if ((stateGearChange = 0x85)) {
+        mapOutputTemp1 = get_muldiv(MTD1, rcvThrottle, THROTTLE_MULTIP_REDUCE, 128)
+        riMcThrottleTemp = map_two_points(mapOutputTemp1, 0, 255, 0, 32767)
+        mapOutputTemp1 = get_muldiv(MTD2, rcvThrottle, THROTTLE_MULTIP_REDUCE, 128)
+        leMcThrottleTemp = map_two_points(mapOutputTemp1, 0, 255, 0, 32767)
+        
+        if ( (rcvStateGearChange = 0x86) ) {
+            ; Right controller has changed throttle
+            stateGearChange = 0x86
+        } else if (smeshDLY_output = 0) {
+            ; It takes too much time to change gear
+            stateGearChange = 0xFF
+            
+        }
+    }
+    
+    
+    ;;;;; 7. Increase left throttle
+    
+    if ((stateGearChange = 0x86)) {
+        
+        battDrivePowerLim = get_muldiv(MTD1, battDrivePowerLimTemp1, THROTTLE_MULTIP_INCREASE, 128)
+        
+        Neutral_Braking_TrqM = NEUTRAL_BRAKING_INIT
+        
+        stateGearChange = 0x87
         
         setup_delay(gearChangeDLY, GEAR_CHANGE_BEFORE_DELAY)
     }
     
-    if (stateGearChange = 0x85) {
-        mapOutputTemp1 = get_muldiv(MTD1, rcvThrottle, THROTTLE_MULTIP_REDUCE, 128)
-        riMcThrottleTemp = map_two_points(mapOutputTemp1, 0, 255, 0, 32767)
-        leMcThrottleTemp = map_two_points(rcvThrottle, 0, 255, 0, 32767)
-        
-        if (gearChangeDLY_output = 0) {
-            stateGearChange = 0x86
-        }
-        
-    }
     
-    if (stateGearChange = 0x86) {
-        ; 16 OFF(clear); 118 ON(set) ; & (gearChangeDLY_output = 0) 
-        set_DigOut(SMESH_RIGHT_PIN)                          ; Change gear
-        
-        setup_delay(gearChangeDLY, GEAR_CHANGE_AFTER_DELAY)
-        
-        stateGearChange = 0x87
-    }
+    ;;;;; 8. Wait before changing gear
     
     if (stateGearChange = 0x87) {
         mapOutputTemp1 = get_muldiv(MTD1, rcvThrottle, THROTTLE_MULTIP_REDUCE, 128)
         riMcThrottleTemp = map_two_points(mapOutputTemp1, 0, 255, 0, 32767)
-        leMcThrottleTemp = map_two_points(rcvThrottle, 0, 255, 0, 32767)
+        mapOutputTemp1 = get_muldiv(MTD2, rcvThrottle, THROTTLE_MULTIP_INCREASE, 128)
+        leMcThrottleTemp = map_two_points(mapOutputTemp1, 0, 255, 0, 32767)
         
         if (gearChangeDLY_output = 0) {
-            stateGearChange = 0x8B
-            
-            send_mailbox(MAILBOX_SM_MOSI3)
-            setup_delay(smeshDLY, CAN_DELAY_FOR_ACK)
+            stateGearChange = 0x88
         }
         
     }
     
+    
+    ;;;;; 9. Change right gear
+    
+    if (stateGearChange = 0x88) {
+        ; 16 OFF(clear); 118 ON(set) ; & (gearChangeDLY_output = 0) 
+        set_digout(SMESH_RIGHT_PIN)                          ; Change gear
+        
+        setup_delay(gearChangeDLY, GEAR_CHANGE_AFTER_DELAY)
+        
+        stateGearChange = 0x89
+    }
+    
+    
+    ;;;;; 10. Wait after gear change
+    
+    if (stateGearChange = 0x89) {
+        mapOutputTemp1 = get_muldiv(MTD1, rcvThrottle, THROTTLE_MULTIP_REDUCE, 128)
+        riMcThrottleTemp = map_two_points(mapOutputTemp1, 0, 255, 0, 32767)
+        mapOutputTemp1 = get_muldiv(MTD2, rcvThrottle, THROTTLE_MULTIP_INCREASE, 128)
+        leMcThrottleTemp = map_two_points(mapOutputTemp1, 0, 255, 0, 32767)
+        
+        if (gearChangeDLY_output = 0) {
+            stateGearChange = 0x8A
+            
+        }
+        
+    }
+    
+    
+    ;;;;; 11. Normalize throttle
+    
+    if (stateGearChange = 0x8A) {
+        riMcBattDrivePowerLim = battDrivePowerLimTemp1
+        battDrivePowerLim = battDrivePowerLimTemp1
+        
+        riMcThrottleTemp = map_two_points(rcvThrottle, 0, 255, 0, 32767)
+        leMcThrottleTemp = map_two_points(rcvThrottle, 0, 255, 0, 32767)
+        
+        stateGearChange = 0x8B
+        
+        send_mailbox(MAILBOX_SM_MOSI3)
+        setup_delay(smeshDLY, CAN_DELAY_FOR_ACK)
+    }
+    
+    
+    
+    
+    ;;;;; 12. Normalize throttle and wait for ACK slave: procedure is finished
+    
     if (stateGearChange = 0x8B) {
+        
         riMcThrottleTemp = map_two_points(rcvThrottle, 0, 255, 0, 32767)
         leMcThrottleTemp = map_two_points(rcvThrottle, 0, 255, 0, 32767)
         
@@ -2242,7 +2431,10 @@ setSmeshTo118Simple:
             
         }
     }
-        
+    
+    
+    ;;;;; 13. Gear change is succesful
+    
     if (stateGearChange = 0x8C) {
         riMcThrottleTemp = map_two_points(rcvThrottle, 0, 255, 0, 32767)
         leMcThrottleTemp = map_two_points(rcvThrottle, 0, 255, 0, 32767)

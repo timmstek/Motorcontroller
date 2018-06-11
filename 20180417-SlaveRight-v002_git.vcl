@@ -131,7 +131,8 @@ contrTemperatureDisplay                 alias       user31          ; Temperatur
 rcvBattDrivePowerLim                    alias       user32          ; Current limits received from master
 rcvBattRegenPowerLim                    alias       user33          ; Current limits received from master
 BATT_DRIVE_PWR_LIM_INIT                 alias       user34
-CURRENT_THRESHOLD_POWER_LIMITING        alias       user35
+NEUTRAL_BRAKING_INIT                    alias       user35
+CURRENT_THRESHOLD_POWER_LIMITING        alias       user36
 
 ; DNR, Throttle and Brake
 rcvDNRCommand                           alias       user40          ; Received DNR state from master
@@ -394,13 +395,13 @@ startup_CAN_System:
             
     setup_mailbox(MAILBOX_SM_MOSI3, 0, 0, MAILBOX_SM_MOSI3_addr, C_EVENT, C_RCV, 0, 0)
 
-    setup_mailbox_data(MAILBOX_SM_MOSI3, 4, 		
+    setup_mailbox_data(MAILBOX_SM_MOSI3, 6, 		
         @rcvThrottleCompensated,			
         @rcvThrottleCompensated + USEHB,
         @rcvStateGearChange,							
         @resetControllerRemote,
-		0,
-		0,
+		@rcvBattDrivePowerLim,
+        @rcvBattDrivePowerLim + USEHB,
         0,
         0)
         
@@ -520,9 +521,11 @@ checkCANMailboxes:
         MAILBOX_MOSI_INIT_PARAM_received = OFF
         
         Brake_Release_Rate_TrqM = Slave_Param_Var1
-        Neutral_Braking_TrqM    = Slave_Param_Var2
+        NEUTRAL_BRAKING_INIT = Slave_Param_Var2
         BATT_DRIVE_PWR_LIM_INIT = Slave_Param_Var3
         ;FREE                   = Slave_Param_Var4
+        
+        Neutral_Braking_TrqM = NEUTRAL_BRAKING_INIT
         
         requestParamStatus = 2
         
@@ -614,7 +617,7 @@ faultHandling:
     }
     
     ; Control Power Limiting
-    if (Regen_State = OFF) {
+    if ( (Motor_Torque > 0) ) {
         ; Motors are consuming current
         battery_power_limit = rcvBattDrivePowerLim
         
@@ -665,46 +668,27 @@ DNR_statemachine:
         vcl_brake = 0
     }
     
-    if ( (rcvStateGearChange = 0x6B) & (stateGearChange <> 0x6D) ) {
-        
-        stateGearChange = 0x6C
-        
-        send_mailbox(MAILBOX_SM_MISO2)
-        
-        setup_delay(smeshFinishedDLY, SMESH_FININSHED_DELAY)
-        while (smeshFinishedDLY_output <> 0) {}
-        
-    ;;;;; 13. Change is successful, thus speed_to_rpm can be changed
-        
-        speed_to_rpm = 601          ; (G/d)*5305 ... 6/530*5305 ... One decimal
-        
-        ; Gear state to complete
-        
-        stateGearChange = 0x6D
-    } else if ( (rcvStateGearChange = 0x8B) & (stateGearChange <> 0x8D) ) {
-        
-        stateGearChange = 0x8C
-        
-        send_mailbox(MAILBOX_SM_MISO2)
-        
-        setup_delay(smeshFinishedDLY, SMESH_FININSHED_DELAY)
-        while (smeshFinishedDLY_output <> 0) {}
-        
-    ;;;;; 13. Change is successful, thus speed_to_rpm can be changed
-        
-        speed_to_rpm = 1802          ; (G/d)*5305 ... 18/530*5305 ... One decimal
-        
-        ; Gear state to complete
-        
-        stateGearChange = 0x8D
-    }
     
     
-
-    if ( (rcvDNRCommand = DRIVE118) | (rcvDNRCommand = DRIVE16) ) {
+    if ( (rcvStateGearChange >= 0x60) & (rcvStateGearChange < 0x6D) ) {
+        ; Changing gear to 1:6
+        
+        call setSmeshTo16Simple
+        
+        
+    } else if ( (rcvStateGearChange >= 0x80) & (rcvStateGearChange < 0x8D) ) {
+        ; Changing gear to 1:18
+        
+        call setSmeshTo118Simple
+        
+    } else if ( (rcvDNRCommand = DRIVE118) | (rcvDNRCommand = DRIVE16) ) {
         
         if (rcvStateGearChange < 0x60) {
             stateGearChange = 0x01
+        }
+        
+        if (Neutral_Braking_TrqM <> NEUTRAL_BRAKING_INIT) {
+            Neutral_Braking_TrqM = NEUTRAL_BRAKING_INIT
         }
         
         VCLThrottleTemp = rcvThrottleCompensated         ; Set throttle to position of pedal
@@ -716,11 +700,20 @@ DNR_statemachine:
             stateGearChange = 0x01
         }
         
+        if (Neutral_Braking_TrqM <> NEUTRAL_BRAKING_INIT) {
+            Neutral_Braking_TrqM = NEUTRAL_BRAKING_INIT
+        }
+        
         VCLThrottleTemp = rcvThrottleCompensated    ; Set throttle to position of pedal
         
         
     } else {
         ; When in neutral or undefined state, set throttle to zero
+        
+        if (Neutral_Braking_TrqM <> NEUTRAL_BRAKING_INIT) {
+            Neutral_Braking_TrqM = NEUTRAL_BRAKING_INIT
+        }
+        
         VCLThrottleTemp = 0
         
         stateGearChange = 0x01
@@ -742,6 +735,89 @@ calculateTemperature:
     
     return
     
+    
+    
+    
+setSmeshTo16Simple:
+    
+    
+    ;;;;; 6. Send ACK: Throttle has been reduced
+    
+    if ( (rcvStateGearChange = 0x65) & (stateGearChange <> 0x66) ) {
+        
+        Neutral_Braking_TrqM = 0
+        
+        stateGearChange = 0x66
+        
+        send_mailbox(MAILBOX_SM_MISO2)
+        
+    }
+    
+    
+    ;;;;; 12. Send ACK: procedure is finished
+    
+    if ( (rcvStateGearChange = 0x6B) & (stateGearChange <> 0x6D) ) {
+        
+        stateGearChange = 0x6C
+        
+        send_mailbox(MAILBOX_SM_MISO2)
+        
+        speed_to_rpm = 601          ; (G/d)*5305 ... 6/530*5305 ... One decimal
+        Neutral_Braking_TrqM = NEUTRAL_BRAKING_INIT
+        
+        ; Gear state to complete
+        
+        stateGearChange = 0x6D
+        
+        
+    }
+    
+    VCLThrottleTemp = rcvThrottleCompensated    ; Set throttle to position of pedal
+    
+    return
+
+
+
+
+
+setSmeshTo118Simple:
+
+    
+    ;;;;; 6. Send ACK: Throttle has been reduced
+
+    if ( (rcvStateGearChange = 0x85) & (stateGearChange <> 0x86) ) {
+        
+        Neutral_Braking_TrqM = 0
+        
+        stateGearChange = 0x86
+        
+        send_mailbox(MAILBOX_SM_MISO2)
+        
+    }
+    
+    
+    ;;;;; 12. Send ACK: procedure is finished
+    
+    if ( (rcvStateGearChange = 0x8B) & (stateGearChange <> 0x8D) ) {
+        
+        stateGearChange = 0x8C
+        
+        send_mailbox(MAILBOX_SM_MISO2)
+        
+        speed_to_rpm = 1802          ; (G/d)*5305 ... 18/530*5305 ... One decimal
+        Neutral_Braking_TrqM = NEUTRAL_BRAKING_INIT
+        
+        ; Gear state to complete
+        
+        stateGearChange = 0x8D
+        
+        
+    }
+    
+    VCLThrottleTemp = rcvThrottleCompensated    ; Set throttle to position of pedal
+    
+    
+    return
     
     
     
