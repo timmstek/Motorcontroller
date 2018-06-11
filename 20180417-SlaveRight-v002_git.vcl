@@ -276,8 +276,6 @@ call startup_CAN_System 		;setup and start the CAN communications system
 
 Mainloop:
     
-    Setup_Delay(DLY11, 10)
-    
     if (reset_controller_remote = RESET_PASSWORD) {
         Reset_Controller()
     }
@@ -287,9 +285,6 @@ Mainloop:
     call DNR_statemachine
     
     call faultHandling
-    
-    
-    while (DLY11_output <> 0) {}			; Wait 100ms before start
     
     
     goto Mainloop 
@@ -745,13 +740,13 @@ DNR_statemachine:
         ;; Changing gear to 1:6
         call setSmeshTo16
         
-        exit
+        return
         
     } else if ( (RCV_State_GearChange >= 0x80) & (RCV_State_GearChange <= 0x8D) ) {
         ;; Changing gear to 1:18
         call setSmeshTo118
         
-        exit
+        return
 
     } else if ( (State_GearChange = 0xFF) | (RCV_State_GearChange = 0xFF) ) {
         State_GearChange = 0xFF
@@ -868,9 +863,6 @@ setSmeshTo16:
         State_GearChange = 0x6D
         
         send_mailbox(MAILBOX_SM_MISO2)
-        
-        Setup_Delay(General_DLY, SMESH_FININSHED_DELAY)
-        while (General_DLY_output <> 0) {}
     }
     
     
@@ -882,9 +874,6 @@ setSmeshTo16:
         State_GearChange = 0xFF
         
         send_mailbox(MAILBOX_SM_MISO2)
-        
-        Setup_Delay(General_DLY, SMESH_FININSHED_DELAY)
-        while (General_DLY_output <> 0) {}
     }
     
     
@@ -960,9 +949,6 @@ setSmeshTo118:
         State_GearChange = 0x8D
         
         send_mailbox(MAILBOX_SM_MISO2)
-        
-        Setup_Delay(General_DLY, SMESH_FININSHED_DELAY)
-        while (General_DLY_output <> 0) {}
     }
     
     
@@ -974,9 +960,6 @@ setSmeshTo118:
         State_GearChange = 0xFF
         
         send_mailbox(MAILBOX_SM_MISO2)
-        
-        Setup_Delay(General_DLY, SMESH_FININSHED_DELAY)
-        while (General_DLY_output <> 0) {}
     }
 	
 	

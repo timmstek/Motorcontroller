@@ -548,46 +548,21 @@ Mainloop:
     
     call checkCANMailboxes
     
-    test = 1
-    Setup_Delay(DLY14, 10)
-    while (DLY14_output <> 0) {}			; Wait 100ms before start
-    
     call DNRStatemachine
-    
-    test = 2
-    Setup_Delay(DLY14, 10)
-    while (DLY14_output <> 0) {}			; Wait 100ms before start
     
     ; All present Errors are Handled appropriate
     call faultHandling
-    
-    test = 3
-    Setup_Delay(DLY14, 10)
-    while (DLY14_output <> 0) {}			; Wait 100ms before start
     
     
     if (Low_Prio_Loop_DLY_output = 0) {
     
         call controlFans
         
-        test = 4
-        Setup_Delay(DLY14, 10)
-        while (DLY14_output <> 0) {}			; Wait 100ms before start
-        
         call calculateEfficiency
-        
-        test = 5
-        Setup_Delay(DLY14, 10)
-        while (DLY14_output <> 0) {}			; Wait 100ms before start
         
         Setup_Delay(Low_Prio_Loop_DLY, LOW_PRIO_LOOP_RATE)
         
     }
-    
-    
-    test = 6
-    Setup_Delay(DLY14, 10)
-    while (DLY14_output <> 0) {}			; Wait 100ms before start
     
     
     goto mainLoop 
@@ -1445,12 +1420,6 @@ DNRStatemachine:
         }
     }
     
-    
-    ;Put_Spy_Message("LOOP",1,"AG",PSM_TEXT_ONLY)
-    
-    ;Setup_Delay(DLY16, 500)
-    ;while (DLY16_output <> 0) {}			; Wait 500ms before start
-    
     if ( (State_GearChange >= 0x60) & (State_GearChange < 0x6D) ) {
         
         ;; Changing gear to 1:6
@@ -1470,9 +1439,9 @@ DNRStatemachine:
             fault_CNT_GearChange = fault_CNT_GearChange + 1
             State_GearChange = 0x60
             
-            exit
+            return
         } else {
-            exit
+            return
         }
         
         
@@ -1498,9 +1467,9 @@ DNRStatemachine:
             fault_CNT_GearChange = fault_CNT_GearChange + 1
             State_GearChange = 0x80
             
-            exit
+            return
         } else {
-            exit
+            return
         }
         
 
@@ -1542,11 +1511,12 @@ DNRStatemachine:
         temp_Map_Output_1 = get_map_output(MAP_GEAR118, Motor_RPM)
         
         ;if ( (Motor_Torque < temp_Map_Output_1) & (GEAR_CHANGE_PROT_DLY_output = 0) ) {
-        ;    ; 1:6 is more efficient, so switch to 1:6
-        ;    
-        ;    State_GearChange = 0x60
-        ;    
-        ;}
+        if ( (Motor_RPM > 1500) & (GEAR_CHANGE_PROT_DLY_output = 0) ) {
+            ; 1:6 is more efficient, so switch to 1:6
+            
+            State_GearChange = 0x60
+            
+        }
         
         if (RCV_DNR_Command = DNR_NEUTRAL) {          ; if received DNR command is Neutral
             RCV_DNR_Command = 0     ; Clear Command from RDW scherm
@@ -1582,7 +1552,8 @@ DNRStatemachine:
         ; Check Efficiency
         temp_Map_Output_1 = get_map_output(MAP_GEAR16, Motor_RPM)
         
-        if ( (Motor_Torque > temp_Map_Output_1) & (GEAR_CHANGE_PROT_DLY_output = 0) ) {
+        ;if ( (Motor_Torque > temp_Map_Output_1) & (GEAR_CHANGE_PROT_DLY_output = 0) ) {
+        if ( (Motor_RPM < 2100) & (GEAR_CHANGE_PROT_DLY_output = 0) ) {
             ; 1:18 is more efficient, so switch to 1:18
             
             State_GearChange = 0x80
@@ -1632,10 +1603,6 @@ DNRStatemachine:
         
         
     } else if (state_DNR = PRE_DRIVE) {
-        ;Put_Spy_Message("PRE_DR",0,"",PSM_TEXT_ONLY)
-        
-        ;Setup_Delay(DLY16, 500)
-        ;while (DLY16_output <> 0) {}			; Wait 500ms before start
         
         ; Check whether car can be put in Drive
         if (Vehicle_Speed < -MAX_SPEED_CHANGE_DNR) {
@@ -1747,11 +1714,6 @@ setSmeshTo16:
         ; Smesh is already in 1:18 mode (16 OFF(clear); 118 ON(set))
         ; So directly go to the end of the functions
         
-        ;Put_Spy_Message("118G",0,"",PSM_TEXT_ONLY)
-        
-        ;Setup_Delay(DLY16, 500)
-        ;while (DLY16_output <> 0) {}			; Wait 500ms before start
-        
         State_GearChange = 0x6C
     }
 
@@ -1762,11 +1724,6 @@ setSmeshTo16:
         temp_Map_Output_1 = Map_Two_Points(RCV_Throttle, 0, 255, 0, 32767)
         VCL_Throttle = get_muldiv(MTD1, THROTTLE_MULTIP_REDUCE, temp_Map_Output_1, 128)
         State_GearChange = 0x61
-        
-        ;Put_Spy_Message("118B",0,"",PSM_TEXT_ONLY)
-        
-        ;Setup_Delay(DLY16, 500)
-        ;while (DLY16_output <> 0) {}			; Wait 500ms before start
         
         send_mailbox(MAILBOX_SM_MOSI3)
         Setup_Delay(Smesh_DLY, CAN_DELAY_FOR_ACK)
@@ -1922,22 +1879,12 @@ setSmeshTo16:
         
         ; Gear state to complete
         
-        ;Put_Spy_Message("118S",0,"",PSM_TEXT_ONLY)
-        
-        ;Setup_Delay(DLY16, 500)
-        ;while (DLY16_output <> 0) {}			; Wait 500ms before start
-        
         Setup_Delay(GEAR_CHANGE_PROT_DLY, PROTECTION_DELAY_GRCHANGE)
     }
     
     
     
     if ( (State_GearChange = 0xFF) | (RCV_State_GearChange = 0xFF) ) {
-        
-        ;Put_Spy_Message("FL_CGR",0,"",PSM_TEXT_ONLY)
-        
-        ;Setup_Delay(DLY16, 500)
-        ;while (DLY16_output <> 0) {}			; Wait 500ms before start
         
         set_DigOut(SmeshLeftPin)                          ; Change gear
         set_DigOut(SmeshRightPin)                          ; Change gear
@@ -1980,11 +1927,6 @@ setSmeshTo118:
         ; Smesh is already in 1:18 mode (16 OFF(clear); 118 ON(set))
         ; So directly go to the end of the functions
         
-        ;Put_Spy_Message("118G",0,"",PSM_TEXT_ONLY)
-        
-        ;Setup_Delay(DLY16, 500)
-        ;while (DLY16_output <> 0) {}			; Wait 500ms before start
-        
         State_GearChange = 0x8C
     }
 
@@ -1995,11 +1937,6 @@ setSmeshTo118:
         temp_Map_Output_1 = Map_Two_Points(RCV_Throttle, 0, 255, 0, 32767)
         VCL_Throttle = get_muldiv(MTD1, THROTTLE_MULTIP_REDUCE, temp_Map_Output_1, 128)
         State_GearChange = 0x81
-        
-        ;Put_Spy_Message("118B",0,"",PSM_TEXT_ONLY)
-        
-        ;Setup_Delay(DLY16, 500)
-        ;while (DLY16_output <> 0) {}			; Wait 500ms before start
         
         send_mailbox(MAILBOX_SM_MOSI3)
         Setup_Delay(Smesh_DLY, CAN_DELAY_FOR_ACK)
@@ -2153,25 +2090,12 @@ setSmeshTo118:
         
         ; Gear state to complete
         
-        ;Put_Spy_Message("118S",0,"",PSM_TEXT_ONLY)
-        
-        ;Setup_Delay(DLY16, 500)
-        ;while (DLY16_output <> 0) {}			; Wait 500ms before start
-        
         Setup_Delay(GEAR_CHANGE_PROT_DLY, PROTECTION_DELAY_GRCHANGE)
     }
-    
-    Setup_Delay(General_DLY, SMESH_FININSHED_DELAY)
-    while (General_DLY_output <> 0) {}
     
     
     
     if ( (State_GearChange = 0xFF) | (RCV_State_GearChange = 0xFF) ) {
-        
-        ;Put_Spy_Message("FL_CGR",0,"",PSM_TEXT_ONLY)
-        
-        ;Setup_Delay(DLY16, 500)
-        ;while (DLY16_output <> 0) {}			; Wait 500ms before start
         
         set_DigOut(SmeshLeftPin)                          ; Change gear
         set_DigOut(SmeshRightPin)                          ; Change gear
