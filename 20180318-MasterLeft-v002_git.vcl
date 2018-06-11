@@ -112,8 +112,8 @@ FANSPEED_IDLE_OUT               constant    0
 
 
 ; Current settings
-BATT_DRIVE_PWR_LIM_INIT         constant    20          ; per 10W
-BATT_REGEN_PWR_LIM_INIT         constant    30           ; per 10W
+BATT_DRIVE_PWR_LIM_INIT         constant    225          ; per 10W, per 200mA
+BATT_REGEN_PWR_LIM_INIT         constant    50           ; per 10W, per 200mA
 
 BATTERY_DRIVE_POWER_LIMIT_MIN   constant    0
 BATTERY_REGEN_POWER_LIMIT_MIN   constant    0
