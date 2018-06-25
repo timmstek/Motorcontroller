@@ -53,7 +53,8 @@ VCL_App_Ver = 012
 
 
 ; TO DO:
-; Predict range
+; Small correction speed (a bit lower)
+; Limit current at 15kW
 
 ; TEST:
 ; current cutbacks
@@ -103,17 +104,17 @@ CAN_NOTHING_RECEIVE_INIT        constant    1000
 
 ; Fan Settings
 FAN_TEMPERATURE_HYSTER          constant    5       ; Temperature should first drop this amount under threshold to turn off fans
-MOTOR_COOLDOWN_THOLD            constant    110     ; from this temperature in C Fans will turn on, offset -50 C: 60 +50=110
-CONTROLLER_COOLDOWN_THOLD       constant    100     ; offset -50 C: 50 +50=100
-MOTOR_TEMP_FAN_MAX              constant    135     ; At this temperature of motor, fans are spinning at maximum, offset -50 C: 85 +50=135
-CONTR_TEMP_FAN_MAX              constant    125     ; offset -50 C: 75 +50=125
-FANSPEED_IDLE_IN                constant    10      ; In idle mode, fans will always run at 10%
+MOTOR_COOLDOWN_THOLD            constant    90      ; 40 +50, from this temperature in C Fans will turn on, offset -50 C 
+MOTOR_TEMP_FAN_MAX              constant    125     ; 75 +50, At this temperature of motor, fans are spinning at maximum, offset -50 C
+CONTROLLER_COOLDOWN_THOLD       constant    90      ; 40 +50, offset -50 C: 
+CONTR_TEMP_FAN_MAX              constant    115     ; 65 +50, offset -50 C
+FANSPEED_IDLE_IN                constant    25      ; In idle mode, fans will always run at 10%
 FANSPEED_IDLE_OUT               constant    0
 
 
 ; Current settings
-BATT_DRIVE_PWR_LIM_INIT         constant    225          ; per 10W, per 200mA
-BATT_REGEN_PWR_LIM_INIT         constant    50           ; per 10W, per 200mA
+BATT_DRIVE_PWR_LIM_INIT         constant    375          ; per 10W, per 200mA
+BATT_REGEN_PWR_LIM_INIT         constant    75           ; per 10W, per 200mA
 
 BATTERY_DRIVE_POWER_LIMIT_MIN   constant    0
 BATTERY_REGEN_POWER_LIMIT_MIN   constant    0
@@ -126,25 +127,26 @@ TIME_TO_FULL_LOS_FAULT          constant    10000    ; Time it takes to go to fu
                                                     
 NEUTRAL_BRAKING_INIT            constant    15000        ; 10% of 32767
                               
-BATT_CUR_LIM_FAULT_MARGIN       constant    80
-BATT_VOLT_LIM_FAULT_MARGIN      constant    95
-BATT_TEMP_FAULT_MARGIN          constant    90
+BATT_CUR_LIM_FAULT_MARGIN_PERC       constant    80     ; Percentage of the current limit received from batteries. From this threshold drive limits are active
+BATT_VOLT_LIM_FAULT_MARGIN_PERC      constant    95     ; Percentage of the voltage limit received from batteries. From this threshold drive limits are active
+BATT_TEMP_FAULT_MARGIN_PERC          constant    90     ; Percentage of the temperature limit received from batteries. From this threshold drive limits are active
 
 ; DNR, Gear change and steering settings
 GEAR_CHANGE_BEFORE_DELAY        constant    400
-GEAR_CHANGE_AFTER_DELAY         constant    100
+GEAR_CHANGE_BETWEEN_DELAY       constant    1000
+GEAR_CHANGE_AFTER_DELAY         constant    5000
 PROTECTION_DELAY_GRCHANGE       constant    5000    ; Allowed to only change gear once per second, in ms
-THROTTLE_MULTIP_REDUCE          constant    1      ; 26/128 = 0.2 multiplier for reducing throttle during gear change
+THROTTLE_MULTIP_REDUCE          constant    1       ; 26/128 = 0.2 multiplier for reducing throttle during gear change
 THROTTLE_MULTIP_INCREASE        constant    192     ; 192/128 = 1.5 multiplier for increasing throttle during gear change
 MAX_SPEED_CHANGE_DNR            constant    50      ; in km/h, with 1 decimal
-MINIMUM_SPEED_GEAR16            constant    50       ; minimum vehicle speed for gear 1:6, with 1 decimal
+MINIMUM_SPEED_GEAR16            constant    50      ; minimum vehicle speed for gear 1:6, with 1 decimal
 
-IDLE_RPM_THRESHOLD              constant    5       ; If RPM is lower than this value, interlock is turned on after some time
-IDLE_THROTTLE_THRESHOLD         constant    2       ; If throttle signal is below this value, interlock is turned on after some time
+IDLE_RPM_THRESHOLD              constant    20       ; If RPM is lower than this value, interlock is turned on after some time
+IDLE_THROTTLE_THRESHOLD         constant    15       ; If throttle signal is below this value, interlock is turned on after some time
 TIME_TO_START_STOP              constant    10000   ; If car is idle for 10s, turn off interlock
 
 FULL_BRAKE                      constant    32767   ; On a scale of 0-32767, how hard controller will brake
-INIT_STEER_COMPENSATION         constant    125     ; 255 no effect, 0 full effect. At max steer angle, multiplier has this value
+INIT_STEER_COMPENSATION         constant    125     ; 255 no effect, 0 full effect. At max steer angle, throttle multiplier has this value
 STEER_ANGLE_NO_EFFECT           constant    2       ; first 2 degrees has no effect on the compensation
 HIGH_PEDAL_DISABLE_THRESHOLD    constant    5       ; 0-255, When going into drive mode, throttle has to be reduced below this value
 
@@ -538,10 +540,10 @@ User_Fault_Action_16 = 1101100000000000b            ; Shutdown motor, shut down 
 
 ;--------------- OUTPUTS ----------------
 ;Main contactor     alias PWM1					;Pin J1-06
-; EM Brake			alias PWM2					;Pin J1-05
-fanIn1				alias PWM3					;Pin J1-04
-fanOut2				alias PWM4					;Pin J1-03
-;Free				alias PWM5					;Pin J1-02
+fanIn1			    alias PWM2					;Pin J1-05
+fanOut2				alias PWM3					;Pin J1-04
+SmeshLeftPWM1			alias PWM4					;Pin J1-03
+SmeshRightPWM2			alias PWM5					;Pin J1-02
 
 SMESH_LEFT_PIN			    alias DigOut6				;Pin J1-19 (16 OFF(clear); 118 ON(set))
 SMESH_LEFT_PIN_OUTPUT	    alias Dig6_output
@@ -567,10 +569,12 @@ startStopDLY                    alias DLY6
 startStopDLY_output             alias DLY6_output
 lowPrioLoopDLY                  alias DLY7
 lowPrioLoopDLY_output           alias DLY7_output
-gearChangeDLY                   alias DLY8
-gearChangeDLY_output            alias DLY8_output
-communicationSlaveErrorDLY          alias DLY9
-communicationSlaveErrorDLY_ouput    alias DLY9_output
+gearChangeLeftDLY                   alias DLY8
+gearChangeLeftDLY_output            alias DLY8_output
+gearChangeRightDLY                  alias DLY9
+gearChangeRightDLY_output           alias DLY9_output
+communicationSlaveErrorDLY          alias DLY10
+communicationSlaveErrorDLY_ouput    alias DLY10_output
 
 regenFaultRMP                   alias RMP1
 regenFaultRMP_output            alias RMP1_output
@@ -627,8 +631,82 @@ NEUTRAL_BRAKING_INIT_VARIABLE = NEUTRAL_BRAKING_INIT
 ; For testing purposes
 rcvSteerangle = 125
 ;rcvKeySwitch = 1
-;rcvThrottle = 0
+rcvThrottle = 0
 ;rcvDNRCommand = 1
+;startStopActive = 1
+
+
+stateOfCharge = 80
+stateOfCharge = 80
+BMSState = 6
+packCapacity = 3300
+
+
+battErrorMsg1 = 0
+battErrorMsg2 = 0
+battErrorMsg3 = 0
+battErrorMsg4 = 0
+
+rcvBattVolt = 6399
+rcvBattCur = -32
+
+rcvBattTempBMS = 25
+rcvBattChargeUnderTemp = 0
+rcvBattDischargeOverTemp = 50
+rcvBattTempCell1 = 25
+rcvBattTempCell2 = 25
+
+rcvBattCurLimCharge = 800
+rcvBattCurLimDischarge = -3200
+rcvBattVoltLimCharge = 59
+rcvBattVoltLimDischarge = 40
+
+
+; Margin on Temp
+if ( (battDischargeOverTempPrev <> rcvBattDischargeOverTemp) | (battChargeUnderTempPrev <> rcvBattChargeUnderTemp) ) {
+    battDischargeOverTempMargin = get_muldiv(MTD1, rcvBattDischargeOverTemp, BATT_TEMP_FAULT_MARGIN_PERC, 100)
+    battChargeUnderTempMargin = get_muldiv(MTD2, rcvBattChargeUnderTemp, BATT_TEMP_FAULT_MARGIN_PERC, 100)
+    
+    battDischargeOverTempPrev = rcvBattDischargeOverTemp
+    battChargeUnderTempPrev = rcvBattChargeUnderTemp
+}
+
+if ( (rcvBattTempBMS > rcvBattTempCell1) & (rcvBattTempBMS > rcvBattTempCell2) ) {
+    battTempDisplay = map_two_points(rcvBattTempBMS, -50, 205, 0, 255)
+} else if (rcvBattTempCell1 > rcvBattTempCell2) {
+    battTempDisplay = map_two_points(rcvBattTempCell1, -50, 205, 0, 255)
+} else {
+    battTempDisplay = map_two_points(rcvBattTempCell2, -50, 205, 0, 255)
+}
+
+battVoltDisplay = map_two_points(rcvBattVolt, 0, 32767, 0, 256)            ; [V] ; Voltage range 0-512V, -32767 - 32767
+battCurDisplay = map_two_points(rcvBattCur, -32767, 32767, -1024, 1024)     ; [A] ; Current range -1000 - 1000, -32767 - 32767
+
+battVoltDeci = map_two_points(rcvBattVolt, 0, 32767, 0, 2560)
+battCurDeci = map_two_points(rcvBattCur, -32767, 32767, -10240, 10240)
+
+if ( (battCurLimChargePrev <> rcvBattCurLimCharge) | (battVoltLimChargePrev <> rcvBattVoltLimCharge) | (battCurLimDischargePrev <> rcvBattCurLimDischarge) | (battVoltLimDischargePrev <> rcvBattVoltLimDischarge) ) {
+
+    battCurLimChargeDeci = map_two_points(rcvBattCurLimCharge, -32767, 32767, -5120, 5120) ; -512 - 512, -32767, 32767
+    battCurLimDischargeDeci = map_two_points(rcvBattCurLimDischarge, -32767, 32767, -5120, 5120)
+
+    battVoltLimChargeDeci = rcvBattVoltLimCharge*10
+    battVoltLimDischargeDeci = rcvBattVoltLimDischarge*10
+
+
+    battCurLimChargeMargin = get_muldiv(MTD1, battCurLimChargeDeci, BATT_CUR_LIM_FAULT_MARGIN_PERC, 100)
+    battVoltLimChargeMargin = get_muldiv(MTD2, battVoltLimChargeDeci, BATT_VOLT_LIM_FAULT_MARGIN_PERC, 100)
+
+    battCurLimDischargeMargin = get_muldiv(MTD3, battCurLimDischargeDeci, BATT_CUR_LIM_FAULT_MARGIN_PERC, 100)
+    battVoltLimDischargeMargin = get_muldiv(MTD1, battVoltLimDischargeDeci, BATT_VOLT_LIM_FAULT_MARGIN_PERC, 100)
+
+    battCurLimChargePrev = rcvBattCurLimCharge
+    battVoltLimChargePrev = rcvBattVoltLimCharge
+    battCurLimDischargePrev = rcvBattCurLimDischarge
+    battVoltLimDischargePrev = rcvBattVoltLimDischarge
+}
+
+
 
 
 
@@ -734,15 +812,15 @@ startupCANSystem:
 
     setup_mailbox(MAILBOX_SM_MOSI1, 0, 0, MAILBOX_SM_MOSI1_addr, C_CYCLIC, C_XMT, 0, 0)
 
-    setup_mailbox_data(MAILBOX_SM_MOSI1, 8,
+    setup_mailbox_data(MAILBOX_SM_MOSI1, 6,
         @riMcThrottleComp,			; Torque for right motorcontroller
         @riMcThrottleComp + USEHB, 
         @stateGearChange,			        ; Command to change gear
         @riMcBattDrivePowerLim,						; Set max speed
         @riMcBattDrivePowerLim + USEHB,
-        @riMcBattRegenPowerLim,					; Set Regen limit
-        @riMcBattRegenPowerLim + USEHB, 
-        @DNRCommand)
+        @DNRCommand,
+        0,
+        0)
 		
 		
 
@@ -1116,8 +1194,8 @@ CheckCANMailboxes:
         
         ; Margin on Temp
         if ( (battDischargeOverTempPrev <> rcvBattDischargeOverTemp) | (battChargeUnderTempPrev <> rcvBattChargeUnderTemp) ) {
-            battDischargeOverTempMargin = get_muldiv(MTD1, rcvBattDischargeOverTemp, BATT_TEMP_FAULT_MARGIN, 100)
-            battChargeUnderTempMargin = get_muldiv(MTD2, rcvBattChargeUnderTemp, BATT_TEMP_FAULT_MARGIN, 100)
+            battDischargeOverTempMargin = get_muldiv(MTD1, rcvBattDischargeOverTemp, BATT_TEMP_FAULT_MARGIN_PERC, 100)
+            battChargeUnderTempMargin = get_muldiv(MTD2, rcvBattChargeUnderTemp, BATT_TEMP_FAULT_MARGIN_PERC, 100)
             
             battDischargeOverTempPrev = rcvBattDischargeOverTemp
             battChargeUnderTempPrev = rcvBattChargeUnderTemp
@@ -1145,11 +1223,11 @@ CheckCANMailboxes:
             battVoltLimDischargeDeci = rcvBattVoltLimDischarge*10
             
             
-            battCurLimChargeMargin = get_muldiv(MTD1, battCurLimChargeDeci, BATT_CUR_LIM_FAULT_MARGIN, 100)
-            battVoltLimChargeMargin = get_muldiv(MTD2, battVoltLimChargeDeci, BATT_VOLT_LIM_FAULT_MARGIN, 100)
+            battCurLimChargeMargin = get_muldiv(MTD1, battCurLimChargeDeci, BATT_CUR_LIM_FAULT_MARGIN_PERC, 100)
+            battVoltLimChargeMargin = get_muldiv(MTD2, battVoltLimChargeDeci, BATT_VOLT_LIM_FAULT_MARGIN_PERC, 100)
             
-            battCurLimDischargeMargin = get_muldiv(MTD3, battCurLimDischargeDeci, BATT_CUR_LIM_FAULT_MARGIN, 100)
-            battVoltLimDischargeMargin = get_muldiv(MTD1, battVoltLimDischargeDeci, BATT_VOLT_LIM_FAULT_MARGIN, 100)
+            battCurLimDischargeMargin = get_muldiv(MTD3, battCurLimDischargeDeci, BATT_CUR_LIM_FAULT_MARGIN_PERC, 100)
+            battVoltLimDischargeMargin = get_muldiv(MTD1, battVoltLimDischargeDeci, BATT_VOLT_LIM_FAULT_MARGIN_PERC, 100)
             
             battCurLimChargePrev = rcvBattCurLimCharge
             battVoltLimChargePrev = rcvBattVoltLimCharge
@@ -1206,7 +1284,7 @@ CheckCANMailboxes:
             
             Slave_Param_Var1 = Brake_Release_Rate_TrqM
             Slave_Param_Var2 = Neutral_Braking_TrqM
-            Slave_Param_Var3 = XMT_BATT_DRIVE_PWR_LIM_INIT
+            Slave_Param_Var3 = 0
             Slave_Param_Var4 = 0
         
             send_mailbox(MAILBOX_MOSI_INIT_PARAM)
@@ -1245,8 +1323,6 @@ retrieveErrors:
         tempFault = ON
     }
     
-    ; TO DO: Check whether rcvBattCurLimCharge is positive or not
-    
 	if ( (battChargeCurAlarm = OFF) & (battOvervoltageAlarm = OFF) ) {
         regenCritError = OFF
     } else {
@@ -1273,7 +1349,7 @@ retrieveErrors:
         driveFault = ON
     }
     
-	if ( (battCMAlert = OFF) & (battPowerStageError = OFF) & (communicationSlaveErrorDLY_ouput <> 0) & (BMSState <> 11) ) {
+	if ( (battCMAlert = OFF) & (battPowerStageError = OFF) & (BMSState <> 11) & (communicationSlaveErrorDLY_ouput <> 0) ) {
         generalCritError = OFF
     } else {
         generalCritError = ON
@@ -1351,7 +1427,7 @@ faultHandling:
         
     }
     
-    if ( (FaultSystem = 0) & (riMcFaultSystem = 0) & (LOSActive = 1) ) {
+    if ( (FaultSystem = 0) & (riMcFaultSystem = 0) & (driveFaultRMP_output <> 0) ) {
         ; When there are no faults, set current limits normally
         
         set_ramp_target(driveFaultRMP, 0)          ; Target is 0ms
@@ -1448,14 +1524,15 @@ faultHandling:
     
     ; Control Power Limiting
     test_bit0 = Regen_State
-    if ( (battCurDeci < 0) ) {
+    if ( (Motor_Torque > -20) ) {
         ; Motors are consuming current
         Battery_Power_Limit = battDrivePowerLim
+        riMcBattDrivePowerLim = battDrivePowerLim
         
     } else {
         ; Motors are producing current
         Battery_Power_Limit = battRegenPowerLim
-        
+        riMcBattDrivePowerLim = battDrivePowerLim
     }
     
     if ( (battDrivePowerLim = BATT_DRIVE_PWR_LIM_INIT) & (battRegenPowerLim = BATT_REGEN_PWR_LIM_INIT) & (LOSActive = 1) ) {
@@ -1464,6 +1541,8 @@ faultHandling:
         
         FaultSystemDisplay = 0
     }
+    
+    
     
     
     if ( (System_Action <> 0) | (FaultSystem <> 0) | (rcvRiMcFaultSystem <> 0) ) {
@@ -1586,11 +1665,11 @@ controlFans:
     }
     
     if (fanPercHighest = 0) {
-        airFlowInPWM = map_two_points(FANSPEED_IDLE_IN, 0, 100, 0, 32767)
-        airFlowOutPWM = map_two_points(FANSPEED_IDLE_OUT, 0, 100, 0, 32767)
+        airFlowInPWM = map_two_points(FANSPEED_IDLE_IN, 0, 100, 4500, 0)
+        airFlowOutPWM = map_two_points(FANSPEED_IDLE_OUT, 0, 100, 4500, 0)
     } else {
-        airFlowInPWM = map_two_points(fanPercHighest, 0, 100, 0, 32767)
-        airFlowOutPWM = map_two_points(fanPercHighest, 0, 100, 0, 32767)
+        airFlowInPWM = map_two_points(fanPercHighest, 0, 100, 4500, 0)
+        airFlowOutPWM = map_two_points(fanPercHighest, 0, 100, 4500, 0)
     }
     
     put_PWM(fanIn1, airFlowInPWM)
@@ -1653,7 +1732,7 @@ DNRStateMachine:
         } else {
             startStopInit = 0
             startStopActive = 0
-            if ((Interlock_State = OFF)) {
+            if ((Interlock_State = OFF) & (startStopActive = 0) ) {
                 set_interlock()
             }
             
@@ -1666,6 +1745,8 @@ DNRStateMachine:
         
         
     } else {
+        
+        stateDNR = NEUTRAL
         
         if ((rcvKeySwitch = 1)) {
             ; Key switch state has changed, so turn on car
@@ -1690,7 +1771,7 @@ DNRStateMachine:
         if (rcvDNRCommand <> 0) {
             rcvDNRCommand = 0
         }
-        stateDNR = NEUTRAL
+        
     }
     
     
@@ -1778,12 +1859,12 @@ DNRStateMachine:
         ; if efficency is wrong switch gear to 16
         
         if ( HPO = 0 ) {
-            leMcThrottleTemp = map_two_points(rcvThrottle, 0, 255, 0, 32767)     ; Set throttle to position of pedal
+            leMcThrottleTemp = map_two_points(rcvThrottle, 20, 150, 0, 32767)     ; Set throttle to position of pedal
             riMcThrottleTemp = leMcThrottleTemp
         } else if ( rcvThrottle < HIGH_PEDAL_DISABLE_THRESHOLD ) {
             ; HPO is still 1 and throttle is below threshold
             HPO = 0
-            leMcThrottleTemp = map_two_points(rcvThrottle, 0, 255, 0, 32767)     ; Set throttle to position of pedal
+            leMcThrottleTemp = map_two_points(rcvThrottle, 20, 150, 0, 32767)     ; Set throttle to position of pedal
             riMcThrottleTemp = leMcThrottleTemp
         } else {
             ; HPO is active
@@ -1795,13 +1876,13 @@ DNRStateMachine:
         ; Check Efficiency
         mapOutputTemp1 = get_map_output(gear118Map, Motor_RPM)
         
-        if ( (Motor_Torque < mapOutputTemp1) & (Vehicle_Speed > MINIMUM_SPEED_GEAR16) & (gearChangeProtectDLY_output = 0) ) {
+        ;if ( (Motor_Torque < mapOutputTemp1) & (Vehicle_Speed > MINIMUM_SPEED_GEAR16) & (gearChangeProtectDLY_output = 0) ) {
         ;if ( (Motor_RPM > 1500) & (gearChangeProtectDLY_output = 0) ) {
             ; 1:6 is more efficient, so switch to 1:6
             
-            stateGearChange = 0x60
+        ;    stateGearChange = 0x60
             
-        }
+        ;}
         
         if (rcvDNRCommand = DNR_NEUTRAL) {          ; if received DNR command is Neutral
             rcvDNRCommand = 0     ; Clear Command from RDW scherm
@@ -1827,12 +1908,12 @@ DNRStateMachine:
         ; if efficency is wrong switch gear to 118
         
         if ( HPO = 0 ) {
-            leMcThrottleTemp = map_two_points(rcvThrottle, 0, 255, 0, 32767)     ; Set throttle to position of pedal
+            leMcThrottleTemp = map_two_points(rcvThrottle, 20, 150, 0, 32767)     ; Set throttle to position of pedal
             riMcThrottleTemp = leMcThrottleTemp
         } else if ( rcvThrottle < HIGH_PEDAL_DISABLE_THRESHOLD ) {
             ; HPO is still 1 and throttle is below threshold
             HPO = 0
-            leMcThrottleTemp = map_two_points(rcvThrottle, 0, 255, 0, 32767)     ; Set throttle to position of pedal
+            leMcThrottleTemp = map_two_points(rcvThrottle, 20, 150, 0, 32767)     ; Set throttle to position of pedal
             riMcThrottleTemp = leMcThrottleTemp
         } else {
             ; HPO is active
@@ -1844,12 +1925,12 @@ DNRStateMachine:
         mapOutputTemp1 = get_map_output(gear16Map, Motor_RPM)
         
         ;if ( (Motor_Torque > mapOutputTemp1) & (gearChangeProtectDLY_output = 0) ) {
-        if ( (Motor_RPM < 2100) & (gearChangeProtectDLY_output = 0) ) {
+        ;if ( (Motor_RPM < 2100) & (gearChangeProtectDLY_output = 0) ) {
             ; 1:18 is more efficient, so switch to 1:18
             
-            stateGearChange = 0x80
+        ;    stateGearChange = 0x80
             
-        }
+        ;}
         
         if (rcvDNRCommand = DNR_NEUTRAL) {          ; if received DNR command is Neutral
             rcvDNRCommand = 0     ; Clear Command from RDW scherm
@@ -1871,14 +1952,14 @@ DNRStateMachine:
         stateGearChange = 0x01
         
         if ( HPO = 0 ) {
-            mapOutputTemp1 = map_two_points(rcvThrottle, 0, 255, 0, -32767)
+            mapOutputTemp1 = map_two_points(rcvThrottle, 20, 150, 0, -32767)
             leMcThrottleTemp = get_muldiv(MTD1, mapOutputTemp1, REVERSE_THROTTLE_MULTIPLIER, 128)     ; Set throttle to position of pedal
             riMcThrottleTemp = leMcThrottleTemp
         } else if ( rcvThrottle < HIGH_PEDAL_DISABLE_THRESHOLD ) {
             
             ; HPO is still 1 and throttle is below threshold
             HPO = 0
-            mapOutputTemp1 = map_two_points(rcvThrottle, 0, 255, 0, -32767)
+            mapOutputTemp1 = map_two_points(rcvThrottle, 20, 150, 0, -32767)
             leMcThrottleTemp = get_muldiv(MTD1, mapOutputTemp1, REVERSE_THROTTLE_MULTIPLIER, 128)     ; Set throttle to position of pedal
             riMcThrottleTemp = leMcThrottleTemp
         }
@@ -1952,6 +2033,29 @@ DNRStateMachine:
         stateDNR = NEUTRAL
         
     }
+    
+    ; Set smesh to idle, to prevent short
+    if ( (SMESH_LEFT_PIN_OUTPUT = OFF) & (SMESH_RIGHT_PIN_OUTPUT = OFF) ) {
+        ; changed to 1:6
+        if ((gearChangeLeftDLY_output = 0)) {
+            put_PWM(SmeshLeftPWM1, 32767)
+        }
+        if ((gearChangeRightDLY_output = 0)) {
+            put_PWM(SmeshRightPWM2, 32767)
+        }
+        
+    }
+    if ( (SMESH_LEFT_PIN_OUTPUT = ON) & (SMESH_RIGHT_PIN_OUTPUT = ON) ) {
+        ; changed to 1:18
+        if ((gearChangeLeftDLY_output = 0)) {
+            put_PWM(SmeshLeftPWM1, 0)
+        }
+        if ((gearChangeRightDLY_output = 0)) {
+            put_PWM(SmeshRightPWM2, 0)
+        }
+        
+    }
+    
     
     if (faultCNTGearChange > 3) {
         faultCNTGearChange = 0
@@ -2034,7 +2138,7 @@ setSmeshTo16Simple:
         stateGearChange = 0x61
         
         send_mailbox(MAILBOX_SM_MOSI3)
-        setup_delay(gearChangeDLY, GEAR_CHANGE_BEFORE_DELAY)
+        setup_delay(smeshDLY, GEAR_CHANGE_BEFORE_DELAY)
     }
     
     
@@ -2047,7 +2151,7 @@ setSmeshTo16Simple:
         mapOutputTemp1 = get_muldiv(MTD2, rcvThrottle, THROTTLE_MULTIP_INCREASE, 128)
         riMcThrottleTemp = map_two_points(mapOutputTemp1, 0, 255, 0, 32767)
         
-        if (gearChangeDLY_output = 0) {
+        if (smeshDLY_output = 0) {
             stateGearChange = 0x62
         }
         
@@ -2059,8 +2163,10 @@ setSmeshTo16Simple:
     if (stateGearChange = 0x62) {
         ; 16 OFF(clear); 118 ON(set)
         clear_DigOut(SMESH_LEFT_PIN)                          ; Change gear
+        put_PWM(SmeshLeftPWM1, 0)
         
-        setup_delay(gearChangeDLY, GEAR_CHANGE_AFTER_DELAY)
+        setup_delay(smeshDLY, GEAR_CHANGE_BETWEEN_DELAY)
+        setup_delay(gearChangeLeftDLY, GEAR_CHANGE_AFTER_DELAY)
         
         stateGearChange = 0x63
     }
@@ -2074,7 +2180,7 @@ setSmeshTo16Simple:
         mapOutputTemp1 = get_muldiv(MTD2, rcvThrottle, THROTTLE_MULTIP_INCREASE, 128)
         riMcThrottleTemp = map_two_points(mapOutputTemp1, 0, 255, 0, 32767)
         
-        if (gearChangeDLY_output = 0) {
+        if (smeshDLY_output = 0) {
             stateGearChange = 0x64
         }
         
@@ -2084,6 +2190,7 @@ setSmeshTo16Simple:
     ;;;;; 5. Reduce right throttle
     
     if ((stateGearChange = 0x64)) {
+        
         riMcBattDrivePowerLim = get_muldiv(MTD1, battDrivePowerLimTemp1, THROTTLE_MULTIP_REDUCE, 128)
         
         mapOutputTemp1 = get_muldiv(MTD2, rcvThrottle, THROTTLE_MULTIP_REDUCE, 128)
@@ -2127,7 +2234,7 @@ setSmeshTo16Simple:
         
         stateGearChange = 0x67
         
-        setup_delay(gearChangeDLY, GEAR_CHANGE_BEFORE_DELAY)
+        setup_delay(smeshDLY, GEAR_CHANGE_BEFORE_DELAY)
     }
     
     
@@ -2139,7 +2246,7 @@ setSmeshTo16Simple:
         mapOutputTemp1 = get_muldiv(MTD2, rcvThrottle, THROTTLE_MULTIP_INCREASE, 128)
         leMcThrottleTemp = map_two_points(mapOutputTemp1, 0, 255, 0, 32767)
         
-        if (gearChangeDLY_output = 0) {
+        if (smeshDLY_output = 0) {
             stateGearChange = 0x68
         }
         
@@ -2149,10 +2256,12 @@ setSmeshTo16Simple:
     ;;;;; 9. Change right gear
     
     if (stateGearChange = 0x68) {
-        ; 16 OFF(clear); 118 ON(set) ; & (gearChangeDLY_output = 0) 
+        ; 16 OFF(clear); 118 ON(set) ; & (smeshDLY_output = 0) 
         clear_DigOut(SMESH_RIGHT_PIN)                          ; Change gear
+        put_PWM(SmeshRightPWM2, 0)
         
-        setup_delay(gearChangeDLY, GEAR_CHANGE_AFTER_DELAY)
+        setup_delay(gearChangeRightDLY, GEAR_CHANGE_AFTER_DELAY)
+        setup_delay(smeshDLY, GEAR_CHANGE_BETWEEN_DELAY)
         
         stateGearChange = 0x69
     }
@@ -2166,7 +2275,7 @@ setSmeshTo16Simple:
         mapOutputTemp1 = get_muldiv(MTD2, rcvThrottle, THROTTLE_MULTIP_INCREASE, 128)
         leMcThrottleTemp = map_two_points(mapOutputTemp1, 0, 255, 0, 32767)
         
-        if (gearChangeDLY_output = 0) {
+        if (smeshDLY_output = 0) {
             stateGearChange = 0x6A
             
         }
@@ -2177,11 +2286,12 @@ setSmeshTo16Simple:
     ;;;;; 11. Normalize throttle
     
     if (stateGearChange = 0x6A) {
+        
         riMcBattDrivePowerLim = battDrivePowerLimTemp1
         battDrivePowerLim = battDrivePowerLimTemp1
         
-        riMcThrottleTemp = map_two_points(rcvThrottle, 0, 255, 0, 32767)
-        leMcThrottleTemp = map_two_points(rcvThrottle, 0, 255, 0, 32767)
+        riMcThrottleTemp = map_two_points(rcvThrottle, 20, 150, 0, 32767)
+        leMcThrottleTemp = map_two_points(rcvThrottle, 20, 150, 0, 32767)
         
         stateGearChange = 0x6B
         
@@ -2196,8 +2306,8 @@ setSmeshTo16Simple:
     
     if (stateGearChange = 0x6B) {
         
-        riMcThrottleTemp = map_two_points(rcvThrottle, 0, 255, 0, 32767)
-        leMcThrottleTemp = map_two_points(rcvThrottle, 0, 255, 0, 32767)
+        riMcThrottleTemp = map_two_points(rcvThrottle, 20, 150, 0, 32767)
+        leMcThrottleTemp = map_two_points(rcvThrottle, 20, 150, 0, 32767)
         
         if ( (rcvStateGearChange = 0x6C) | (rcvStateGearChange = 0x6D) ) {
             ; Right controller has changed throttle
@@ -2213,8 +2323,8 @@ setSmeshTo16Simple:
     ;;;;; 13. Gear change is succesful
     
     if (stateGearChange = 0x6C) {
-        riMcThrottleTemp = map_two_points(rcvThrottle, 0, 255, 0, 32767)
-        leMcThrottleTemp = map_two_points(rcvThrottle, 0, 255, 0, 32767)
+        riMcThrottleTemp = map_two_points(rcvThrottle, 20, 150, 0, 32767)
+        leMcThrottleTemp = map_two_points(rcvThrottle, 20, 150, 0, 32767)
         
         Speed_to_RPM = 601          ; (G/d)*5305 ... 6/530*5305 ... One decimal
         
@@ -2257,7 +2367,7 @@ setSmeshTo118Simple:
         stateGearChange = 0x81
         
         send_mailbox(MAILBOX_SM_MOSI3)
-        setup_delay(gearChangeDLY, GEAR_CHANGE_BEFORE_DELAY)
+        setup_delay(smeshDLY, GEAR_CHANGE_BEFORE_DELAY)
     }
     
     
@@ -2270,7 +2380,7 @@ setSmeshTo118Simple:
         mapOutputTemp1 = get_muldiv(MTD2, rcvThrottle, THROTTLE_MULTIP_INCREASE, 128)
         riMcThrottleTemp = map_two_points(mapOutputTemp1, 0, 255, 0, 32767)
         
-        if (gearChangeDLY_output = 0) {
+        if (smeshDLY_output = 0) {
             stateGearChange = 0x82
         }
         
@@ -2282,8 +2392,10 @@ setSmeshTo118Simple:
     if (stateGearChange = 0x82) {
         ; 16 OFF(clear); 118 ON(set)
         set_digout(SMESH_LEFT_PIN)                          ; Change gear
+        put_PWM(SmeshLeftPWM1, 32767)
         
-        setup_delay(gearChangeDLY, GEAR_CHANGE_AFTER_DELAY)
+        setup_delay(gearChangeLeftDLY, GEAR_CHANGE_AFTER_DELAY)
+        setup_delay(smeshDLY, GEAR_CHANGE_BETWEEN_DELAY)
         
         stateGearChange = 0x83
     }
@@ -2297,7 +2409,7 @@ setSmeshTo118Simple:
         mapOutputTemp1 = get_muldiv(MTD2, rcvThrottle, THROTTLE_MULTIP_INCREASE, 128)
         riMcThrottleTemp = map_two_points(mapOutputTemp1, 0, 255, 0, 32767)
         
-        if (gearChangeDLY_output = 0) {
+        if (smeshDLY_output = 0) {
             stateGearChange = 0x84
         }
         
@@ -2307,6 +2419,7 @@ setSmeshTo118Simple:
     ;;;;; 5. Reduce right throttle
     
     if ((stateGearChange = 0x84)) {
+        
         riMcBattDrivePowerLim = get_muldiv(MTD1, battDrivePowerLimTemp1, THROTTLE_MULTIP_REDUCE, 128)
         
         mapOutputTemp1 = get_muldiv(MTD2, rcvThrottle, THROTTLE_MULTIP_REDUCE, 128)
@@ -2329,6 +2442,8 @@ setSmeshTo118Simple:
         mapOutputTemp1 = get_muldiv(MTD2, rcvThrottle, THROTTLE_MULTIP_REDUCE, 128)
         leMcThrottleTemp = map_two_points(mapOutputTemp1, 0, 255, 0, 32767)
         
+        rcvStateGearChange = 0x86
+        
         if ( (rcvStateGearChange = 0x86) ) {
             ; Right controller has changed throttle
             stateGearChange = 0x86
@@ -2350,7 +2465,7 @@ setSmeshTo118Simple:
         
         stateGearChange = 0x87
         
-        setup_delay(gearChangeDLY, GEAR_CHANGE_BEFORE_DELAY)
+        setup_delay(smeshDLY, GEAR_CHANGE_BEFORE_DELAY)
     }
     
     
@@ -2362,7 +2477,7 @@ setSmeshTo118Simple:
         mapOutputTemp1 = get_muldiv(MTD2, rcvThrottle, THROTTLE_MULTIP_INCREASE, 128)
         leMcThrottleTemp = map_two_points(mapOutputTemp1, 0, 255, 0, 32767)
         
-        if (gearChangeDLY_output = 0) {
+        if (smeshDLY_output = 0) {
             stateGearChange = 0x88
         }
         
@@ -2372,10 +2487,12 @@ setSmeshTo118Simple:
     ;;;;; 9. Change right gear
     
     if (stateGearChange = 0x88) {
-        ; 16 OFF(clear); 118 ON(set) ; & (gearChangeDLY_output = 0) 
+        ; 16 OFF(clear); 118 ON(set) ; & (smeshDLY_output = 0) 
         set_digout(SMESH_RIGHT_PIN)                          ; Change gear
+        put_PWM(SmeshRightPWM2, 32767)
         
-        setup_delay(gearChangeDLY, GEAR_CHANGE_AFTER_DELAY)
+        setup_delay(gearChangeRightDLY, GEAR_CHANGE_AFTER_DELAY)
+        setup_delay(smeshDLY, GEAR_CHANGE_BETWEEN_DELAY)
         
         stateGearChange = 0x89
     }
@@ -2389,7 +2506,7 @@ setSmeshTo118Simple:
         mapOutputTemp1 = get_muldiv(MTD2, rcvThrottle, THROTTLE_MULTIP_INCREASE, 128)
         leMcThrottleTemp = map_two_points(mapOutputTemp1, 0, 255, 0, 32767)
         
-        if (gearChangeDLY_output = 0) {
+        if (smeshDLY_output = 0) {
             stateGearChange = 0x8A
             
         }
@@ -2400,11 +2517,12 @@ setSmeshTo118Simple:
     ;;;;; 11. Normalize throttle
     
     if (stateGearChange = 0x8A) {
+        
         riMcBattDrivePowerLim = battDrivePowerLimTemp1
         battDrivePowerLim = battDrivePowerLimTemp1
         
-        riMcThrottleTemp = map_two_points(rcvThrottle, 0, 255, 0, 32767)
-        leMcThrottleTemp = map_two_points(rcvThrottle, 0, 255, 0, 32767)
+        riMcThrottleTemp = map_two_points(rcvThrottle, 20, 150, 0, 32767)
+        leMcThrottleTemp = map_two_points(rcvThrottle, 20, 150, 0, 32767)
         
         stateGearChange = 0x8B
         
@@ -2419,8 +2537,10 @@ setSmeshTo118Simple:
     
     if (stateGearChange = 0x8B) {
         
-        riMcThrottleTemp = map_two_points(rcvThrottle, 0, 255, 0, 32767)
-        leMcThrottleTemp = map_two_points(rcvThrottle, 0, 255, 0, 32767)
+        riMcThrottleTemp = map_two_points(rcvThrottle, 20, 150, 0, 32767)
+        leMcThrottleTemp = map_two_points(rcvThrottle, 20, 150, 0, 32767)
+        
+        rcvStateGearChange = 0x8C
         
         if ( (rcvStateGearChange = 0x8C) | (rcvStateGearChange = 0x8D) ) {
             ; Right controller has changed throttle
@@ -2436,8 +2556,8 @@ setSmeshTo118Simple:
     ;;;;; 13. Gear change is succesful
     
     if (stateGearChange = 0x8C) {
-        riMcThrottleTemp = map_two_points(rcvThrottle, 0, 255, 0, 32767)
-        leMcThrottleTemp = map_two_points(rcvThrottle, 0, 255, 0, 32767)
+        riMcThrottleTemp = map_two_points(rcvThrottle, 20, 150, 0, 32767)
+        leMcThrottleTemp = map_two_points(rcvThrottle, 20, 150, 0, 32767)
         
         Speed_to_RPM = 1802          ; (G/d)*5305 ... 18/530*5305 ... One decimal
         
