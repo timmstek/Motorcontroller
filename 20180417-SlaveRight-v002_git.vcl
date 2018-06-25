@@ -130,7 +130,6 @@ motorTemperatureDisplay                 alias       user30          ; Temperatur
 contrTemperatureDisplay                 alias       user31          ; Temperature of Controller 0-255 C
 rcvBattDrivePowerLim                    alias       user32          ; Current limits received from master
 rcvBattRegenPowerLim                    alias       user33          ; Current limits received from master
-BATT_DRIVE_PWR_LIM_INIT                 alias       user34
 NEUTRAL_BRAKING_INIT                    alias       user35
 CURRENT_THRESHOLD_POWER_LIMITING        alias       user36
 
@@ -261,6 +260,8 @@ communicaitonMasterErrorDLY_ouput       alias     DLY7_output
 setup_delay(startupDLY, STARTUP_DELAY)
 while (startupDLY_output <> 0) {}			; Wait 500ms before start
 
+clear_interlock()
+
 ; setup inputs
 setup_switches(DEBOUNCE_INPUTS)
 
@@ -359,15 +360,15 @@ startup_CAN_System:
         
     setup_mailbox(MAILBOX_SM_MOSI1, 0, 0, MAILBOX_SM_MOSI1_addr, C_EVENT, C_RCV, 0, 0)
     
-    setup_mailbox_data(MAILBOX_SM_MOSI1, 8,
+    setup_mailbox_data(MAILBOX_SM_MOSI1, 6,
         @rcvThrottleCompensated,			    ; Torque for right motorcontroller
         @rcvThrottleCompensated + USEHB, 
         @rcvStateGearChange,			        ; Command to change gear
         @rcvBattDrivePowerLim,			    ; Set max speed
-        @rcvBattDrivePowerLim + USEHB,
-        @rcvBattRegenPowerLim,				; Set Regen limit
-        @rcvBattRegenPowerLim + USEHB, 
-        @rcvDNRCommand)
+        @rcvBattDrivePowerLim + USEHB, 
+        @rcvDNRCommand,
+        0,
+        0)
 
 
    			; MAILBOX 3
@@ -521,8 +522,8 @@ checkCANMailboxes:
         MAILBOX_MOSI_INIT_PARAM_received = OFF
         
         Brake_Release_Rate_TrqM = Slave_Param_Var1
-        NEUTRAL_BRAKING_INIT = Slave_Param_Var2
-        BATT_DRIVE_PWR_LIM_INIT = Slave_Param_Var3
+        NEUTRAL_BRAKING_INIT    = Slave_Param_Var2
+        ;FREE                   = Slave_Param_Var3
         ;FREE                   = Slave_Param_Var4
         
         Neutral_Braking_TrqM = NEUTRAL_BRAKING_INIT
@@ -617,15 +618,8 @@ faultHandling:
     }
     
     ; Control Power Limiting
-    if ( (Motor_Torque > 0) ) {
-        ; Motors are consuming current
-        battery_power_limit = rcvBattDrivePowerLim
-        
-    } else {
-        ; Motors are producing current
-        battery_power_limit = rcvBattRegenPowerLim
-        
-    }
+    Battery_Power_Limit = rcvBattDrivePowerLim
+    
     return
 
     
