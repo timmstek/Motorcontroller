@@ -69,7 +69,7 @@ CAN_NOTHING_RECEIVE_INIT        constant    1000
 
 ; Timers
 MAX_TIME_GEARCHANGE			    constant    1500    ; Maximum time gear change may take [ms]
-STARTUP_DELAY                   constant    3000    ; Delay before system starts up [ms]
+STARTUP_DELAY                   constant    2000    ; Delay before system starts up [ms]
 SMESH_FININSHED_DELAY           constant    100      ;
 
 ; DNR, Throttle and Brake

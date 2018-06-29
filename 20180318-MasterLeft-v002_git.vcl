@@ -54,7 +54,8 @@ VCL_App_Ver = 012
 
 ; TO DO:
 ; Small correction speed (a bit lower)
-; Limit current at 15kW
+; Limit torque
+; revise smesh change (full throttle, back and forth in beginning)
 
 ; TEST:
 ; current cutbacks
@@ -113,11 +114,11 @@ FANSPEED_IDLE_OUT               constant    0
 
 
 ; Current settings
-BATT_DRIVE_PWR_LIM_INIT         constant    375          ; per 10W, per 200mA
-BATT_REGEN_PWR_LIM_INIT         constant    75           ; per 10W, per 200mA
+BATT_DRIVE_PWR_LIM_INIT         constant    125          ; per 10W, per 200mA
+BATT_REGEN_PWR_LIM_INIT         constant    37           ; per 10W, per 200mA
 
-BATTERY_DRIVE_POWER_LIMIT_MIN   constant    0
-BATTERY_REGEN_POWER_LIMIT_MIN   constant    0
+BATTERY_DRIVE_POWER_LIMIT_MIN   constant    5
+BATTERY_REGEN_POWER_LIMIT_MIN   constant    5
 
 REDUCED_DRIVE_INPUT_CURLIM_PERC constant    60      ; Drive current limit is 60%, when fault is detected
 REDUCED_REGEN_INPUT_CURLIM_PERC constant    15      ; Regen current limit is 15%, when fault is detected
@@ -136,8 +137,8 @@ GEAR_CHANGE_BEFORE_DELAY        constant    400
 GEAR_CHANGE_BETWEEN_DELAY       constant    1000
 GEAR_CHANGE_AFTER_DELAY         constant    5000
 PROTECTION_DELAY_GRCHANGE       constant    5000    ; Allowed to only change gear once per second, in ms
-THROTTLE_MULTIP_REDUCE          constant    1       ; 26/128 = 0.2 multiplier for reducing throttle during gear change
-THROTTLE_MULTIP_INCREASE        constant    192     ; 192/128 = 1.5 multiplier for increasing throttle during gear change
+THROTTLE_MULTIP_REDUCE          constant    128       ; 26/128 = 0.2 multiplier for reducing throttle during gear change
+THROTTLE_MULTIP_INCREASE        constant    128     ; 192/128 = 1.5 multiplier for increasing throttle during gear change
 MAX_SPEED_CHANGE_DNR            constant    50      ; in km/h, with 1 decimal
 MINIMUM_SPEED_GEAR16            constant    50      ; minimum vehicle speed for gear 1:6, with 1 decimal
 
@@ -145,10 +146,13 @@ IDLE_RPM_THRESHOLD              constant    20       ; If RPM is lower than this
 IDLE_THROTTLE_THRESHOLD         constant    15       ; If throttle signal is below this value, interlock is turned on after some time
 TIME_TO_START_STOP              constant    10000   ; If car is idle for 10s, turn off interlock
 
+MOTOR_TORQUE_LIM_THR            constant    300     ; 1 decimal, from here torque will be limited
+MOTOR_TORQUE_LIM_MAX            constant    410     ; 1 decimal, maximum torque
+
 FULL_BRAKE                      constant    32767   ; On a scale of 0-32767, how hard controller will brake
 INIT_STEER_COMPENSATION         constant    125     ; 255 no effect, 0 full effect. At max steer angle, throttle multiplier has this value
 STEER_ANGLE_NO_EFFECT           constant    2       ; first 2 degrees has no effect on the compensation
-HIGH_PEDAL_DISABLE_THRESHOLD    constant    5       ; 0-255, When going into drive mode, throttle has to be reduced below this value
+HIGH_PEDAL_DISABLE_THRESHOLD    constant    20       ; 0-255, When going into drive mode, throttle has to be reduced below this value
 
 ; Received command for DNR
 DNR_DRIVE                       constant    1       ; CAN code for Drive
@@ -351,8 +355,9 @@ battRegenPowerLimTemp1              alias      user34
 battRegenPowerLimTemp2              alias      user35
 battDrivePowerLimTemp1              alias      user36
 battDrivePowerLimTemp2              alias      user37
+battDrivePowerLimTemp3              alias      user38
 
-LOSActive                           alias      user38
+LOSActive                           alias      user39
 
 ; DNR and Throttle
 riMcThrottleComp                    alias      user40           			; Torque for right motorcontroller, command to Right controller
@@ -361,6 +366,8 @@ rcvDNRCommand                       alias      user42           			; DNR command
 rcvThrottle                         alias      user43           			; Throttle pedal state
 rcvBrake                            alias      user44           			; Brake pedal pushed
 faultCNTGearChange                  alias      user45                     ; Counts number of times gear change has fault    
+
+smeshInit                           alias      user46
 
 
 ; Temperature
@@ -689,6 +696,8 @@ if ( (battCurLimChargePrev <> rcvBattCurLimCharge) | (battVoltLimChargePrev <> r
     battVoltLimDischargePrev = rcvBattVoltLimDischarge
 }
 
+smeshInit = 0 
+
 
 
 
@@ -719,7 +728,10 @@ mainLoop:
     
     call checkCANMailboxes
     
-    call DNRStateMachine
+    ;if (smeshInit = 2) {
+        call DNRStateMachine
+    ;}
+    
     
     if (lowPrioLoopDLY_output = 0) {
         
@@ -729,6 +741,34 @@ mainLoop:
         
         setup_delay(lowPrioLoopDLY, LOW_PRIO_LOOP_RATE)
     }
+    
+    
+    
+    ;if (smeshInit = 0) {
+    ;    if (stateGearChange < 0x60) {
+    ;        stateGearChange = 0x60
+    ;    }
+    ;    
+    ;    call setSmeshTo16Simple
+     ;   
+    ;    if (stateGearChange = 0x6D) {
+    ;        smeshInit = 1
+    ;        
+    ;        setup_delay(startupDLY, STARTUP_DELAY)
+    ;        while (startupDLY_output <> 0) {}			; Wait 500ms before start
+    ;    }
+    ;    
+    ;} else if (smeshInit = 1) {
+    ;    if (stateGearChange < 0x80) {
+    ;        stateGearChange = 0x80
+    ;    }
+    ;    
+    ;    call setSmeshTo118Simple
+    ;    
+    ;    if (stateGearChange = 0x8D) {
+    ;        smeshInit = 2
+    ;    }
+    ;}
     
     
     goto mainLoop 
@@ -869,7 +909,7 @@ startupCANSystem:
     setup_mailbox_data(MAILBOX_RDW_RCV, 3, 			; DNR switch state
         @rcvDNRCommand,
 		@rcvKeySwitch,
-		@rcvSteerangle,					; rcvSteerangle
+		@test,					; rcvSteerangle VERANDEREN rcvSteerangle
         0, 
 		0,
 		0,
@@ -1420,6 +1460,15 @@ faultHandling:
     }
     
     
+    ; Torque limiting
+    if (stateDNR = DRIVE118) {
+        if (motor_torque > MOTOR_TORQUE_LIM_THR) {
+            battDrivePowerLimTemp3 = map_two_points(motor_torque, MOTOR_TORQUE_LIM_THR, MOTOR_TORQUE_LIM_MAX, BATT_DRIVE_PWR_LIM_INIT, BATTERY_DRIVE_POWER_LIMIT_MIN)
+        }
+    }
+    
+    
+    
     ; Drive limiting
     ; Based on Battery data
     if ( (battCurDeci > battCurLimDischargeMargin) & (battVoltDeci > battVoltLimDischargeMargin) ) {
@@ -1453,6 +1502,9 @@ faultHandling:
     ; Choose lowest limit
     if (battDrivePowerLimTemp1 > battDrivePowerLimTemp2) {
         battDrivePowerLimTemp1 = battDrivePowerLimTemp2
+    }
+    if (battDrivePowerLimTemp1 > battDrivePowerLimTemp3) {
+        battDrivePowerLimTemp1 = battDrivePowerLimTemp3
     }
     
     if (stateGearChange < 0x60) {
@@ -1506,7 +1558,7 @@ faultHandling:
     
     ; Control Power Limiting
     test_bit0 = Regen_State
-    if ( (Motor_Torque > -20) ) {
+    if ( battCurDeci < 0 ) {
         ; Motors are consuming current
         Battery_Power_Limit = battDrivePowerLim
         riMcBattDrivePowerLim = battDrivePowerLim
@@ -1858,13 +1910,13 @@ DNRStateMachine:
         ; Check Efficiency
         mapOutputTemp1 = get_map_output(gear118Map, Motor_RPM)
         
-        ;if ( (Motor_Torque < mapOutputTemp1) & (Vehicle_Speed > MINIMUM_SPEED_GEAR16) & (gearChangeProtectDLY_output = 0) ) {
+        if ( (Motor_Torque < mapOutputTemp1) & (Vehicle_Speed > MINIMUM_SPEED_GEAR16) & (gearChangeProtectDLY_output = 0) ) {
         ;if ( (Motor_RPM > 1500) & (gearChangeProtectDLY_output = 0) ) {
             ; 1:6 is more efficient, so switch to 1:6
             
-        ;    stateGearChange = 0x60
+            stateGearChange = 0x60
             
-        ;}
+        }
         
         if (rcvDNRCommand = DNR_NEUTRAL) {          ; if received DNR command is Neutral
             rcvDNRCommand = 0     ; Clear Command from RDW scherm
@@ -1906,13 +1958,13 @@ DNRStateMachine:
         ; Check Efficiency
         mapOutputTemp1 = get_map_output(gear16Map, Motor_RPM)
         
-        ;if ( (Motor_Torque > mapOutputTemp1) & (gearChangeProtectDLY_output = 0) ) {
+        if ( (Motor_Torque > mapOutputTemp1) & (gearChangeProtectDLY_output = 0) ) {
         ;if ( (Motor_RPM < 2100) & (gearChangeProtectDLY_output = 0) ) {
             ; 1:18 is more efficient, so switch to 1:18
             
-        ;    stateGearChange = 0x80
+            stateGearChange = 0x80
             
-        ;}
+        }
         
         if (rcvDNRCommand = DNR_NEUTRAL) {          ; if received DNR command is Neutral
             rcvDNRCommand = 0     ; Clear Command from RDW scherm
