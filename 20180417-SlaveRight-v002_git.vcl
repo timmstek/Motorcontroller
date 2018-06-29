@@ -271,6 +271,9 @@ call startup_CAN_System 		;setup and start the CAN communications system
 setup_delay(communicaitonMasterErrorDLY, CAN_NOTHING_RECEIVE_INIT)
 
 
+Battery_Power_Limit = 125
+
+
 
 
 

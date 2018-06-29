@@ -113,8 +113,8 @@ FANSPEED_IDLE_OUT               constant    0
 
 
 ; Current settings
-BATT_DRIVE_PWR_LIM_INIT         constant    375          ; per 10W, per 200mA
-BATT_REGEN_PWR_LIM_INIT         constant    75           ; per 10W, per 200mA
+BATT_DRIVE_PWR_LIM_INIT         constant    625          ; per 10W, per 200mA
+BATT_REGEN_PWR_LIM_INIT         constant    125           ; per 10W, per 200mA
 
 BATTERY_DRIVE_POWER_LIMIT_MIN   constant    0
 BATTERY_REGEN_POWER_LIMIT_MIN   constant    0
@@ -815,7 +815,7 @@ startupCANSystem:
     setup_mailbox_data(MAILBOX_RDW_RCV, 3, 			; DNR switch state
         @rcvDNRCommand,
 		@rcvKeySwitch,
-		@rcvSteerangle,					; rcvSteerangle
+		@test,					; rcvSteerangle     VERANDEREN
         0, 
 		0,
 		0,
