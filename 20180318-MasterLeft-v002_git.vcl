@@ -105,17 +105,17 @@ CAN_NOTHING_RECEIVE_INIT        constant    1000
 
 ; Fan Settings
 FAN_TEMPERATURE_HYSTER          constant    5       ; Temperature should first drop this amount under threshold to turn off fans
-MOTOR_COOLDOWN_THOLD            constant    90      ; 40 +50, from this temperature in C Fans will turn on, offset -50 C 
+MOTOR_COOLDOWN_THOLD            constant    100      ; 40 +50, from this temperature in C Fans will turn on, offset -50 C 
 MOTOR_TEMP_FAN_MAX              constant    125     ; 75 +50, At this temperature of motor, fans are spinning at maximum, offset -50 C
-CONTROLLER_COOLDOWN_THOLD       constant    90      ; 40 +50, offset -50 C: 
+CONTROLLER_COOLDOWN_THOLD       constant    100      ; 40 +50, offset -50 C: 
 CONTR_TEMP_FAN_MAX              constant    115     ; 65 +50, offset -50 C
-FANSPEED_IDLE_IN                constant    25      ; In idle mode, fans will always run at 10%
+FANSPEED_IDLE_IN                constant    0      ; In idle mode, fans will always run at 10%
 FANSPEED_IDLE_OUT               constant    0
 
 
 ; Current settings
 BATT_DRIVE_PWR_LIM_INIT         constant    125          ; per 10W, per 200mA
-BATT_REGEN_PWR_LIM_INIT         constant    37           ; per 10W, per 200mA
+BATT_REGEN_PWR_LIM_INIT         constant    25           ; per 10W, per 200mA
 
 BATTERY_DRIVE_POWER_LIMIT_MIN   constant    5
 BATTERY_REGEN_POWER_LIMIT_MIN   constant    5
@@ -728,9 +728,9 @@ mainLoop:
     
     call checkCANMailboxes
     
-    ;if (smeshInit = 2) {
+    if (smeshInit = 2) {
         call DNRStateMachine
-    ;}
+    }
     
     
     if (lowPrioLoopDLY_output = 0) {
@@ -744,31 +744,45 @@ mainLoop:
     
     
     
-    ;if (smeshInit = 0) {
-    ;    if (stateGearChange < 0x60) {
-    ;        stateGearChange = 0x60
-    ;    }
-    ;    
-    ;    call setSmeshTo16Simple
-     ;   
-    ;    if (stateGearChange = 0x6D) {
-    ;        smeshInit = 1
-    ;        
-    ;        setup_delay(startupDLY, STARTUP_DELAY)
-    ;        while (startupDLY_output <> 0) {}			; Wait 500ms before start
-    ;    }
-    ;    
-    ;} else if (smeshInit = 1) {
-    ;    if (stateGearChange < 0x80) {
-    ;        stateGearChange = 0x80
-    ;    }
-    ;    
-    ;    call setSmeshTo118Simple
-    ;    
-    ;    if (stateGearChange = 0x8D) {
-    ;        smeshInit = 2
-    ;    }
-    ;}
+    if (smeshInit = 0) {
+        if (stateGearChange < 0x80) {
+            stateGearChange = 0x80
+        }
+        
+        call setSmeshTo118Simple
+        
+        if (stateGearChange = 0x8D) {
+            smeshInit = 2
+        } else if (stateGearChange = 0xFF) {
+            faultCNTGearChange = faultCNTGearChange + 1
+            if (faultCNTGearChange > 3) {
+                smeshInit = 2
+            } else {
+                stateGearChange = 0x60
+            }
+        }
+        
+    } else if (smeshInit = 1) {
+        if (stateGearChange < 0x60) {
+            stateGearChange = 0x60
+        }
+        
+        call setSmeshTo16Simple
+       
+        if (stateGearChange = 0x6D) {
+            smeshInit = 1
+            
+            setup_delay(startupDLY, STARTUP_DELAY)
+            while (startupDLY_output <> 0) {}			; Wait 500ms before start
+        } else if (stateGearChange = 0xFF) {
+            faultCNTGearChange = faultCNTGearChange + 1
+            if (faultCNTGearChange > 3) {
+                smeshInit = 2
+            } else {
+                stateGearChange = 0x60
+            }
+        }
+    }
     
     
     goto mainLoop 
@@ -941,7 +955,7 @@ startupCANSystem:
 
     setup_mailbox(MAILBOX_DRVSEN_RCV, 0, 0, MAILBOX_DRVSEN_RCV_addr, C_EVENT, C_RCV, 0, 0)
     setup_mailbox_data(MAILBOX_DRVSEN_RCV, 1, 		; Efficiency
-        @rcvThrottle,					; Throttle pedal
+        @test,					; Throttle pedal    VERANDEREN
         0,
 		0,
 		0,
@@ -1464,7 +1478,11 @@ faultHandling:
     if (stateDNR = DRIVE118) {
         if (motor_torque > MOTOR_TORQUE_LIM_THR) {
             battDrivePowerLimTemp3 = map_two_points(motor_torque, MOTOR_TORQUE_LIM_THR, MOTOR_TORQUE_LIM_MAX, BATT_DRIVE_PWR_LIM_INIT, BATTERY_DRIVE_POWER_LIMIT_MIN)
+        } else {
+            battDrivePowerLimTemp3 = BATT_DRIVE_PWR_LIM_INIT
         }
+    } else {
+        battDrivePowerLimTemp3 = BATT_DRIVE_PWR_LIM_INIT
     }
     
     
@@ -1777,7 +1795,6 @@ DNRStateMachine:
         }
         
         
-        
     } else {
         
         stateDNR = NEUTRAL
@@ -1797,7 +1814,7 @@ DNRStateMachine:
         if ((System_Action <> 0) & (keySwitchHardResetComplete = 0)) {
             ; There is some fault, so reset controller at turning off car
             keySwitchHardResetComplete = 1
-            resetControllerRemote = RESET_PASSWORD
+            ;resetControllerRemote = RESET_PASSWORD
             
             send_mailbox(MAILBOX_SM_MOSI3)
         }
@@ -1910,13 +1927,13 @@ DNRStateMachine:
         ; Check Efficiency
         mapOutputTemp1 = get_map_output(gear118Map, Motor_RPM)
         
-        if ( (Motor_Torque < mapOutputTemp1) & (Vehicle_Speed > MINIMUM_SPEED_GEAR16) & (gearChangeProtectDLY_output = 0) ) {
+        ;if ( (Motor_Torque < mapOutputTemp1) & (Vehicle_Speed > MINIMUM_SPEED_GEAR16) & (gearChangeProtectDLY_output = 0) ) {
         ;if ( (Motor_RPM > 1500) & (gearChangeProtectDLY_output = 0) ) {
             ; 1:6 is more efficient, so switch to 1:6
             
-            stateGearChange = 0x60
+        ;    stateGearChange = 0x60
             
-        }
+        ;}
         
         if (rcvDNRCommand = DNR_NEUTRAL) {          ; if received DNR command is Neutral
             rcvDNRCommand = 0     ; Clear Command from RDW scherm
@@ -1958,13 +1975,13 @@ DNRStateMachine:
         ; Check Efficiency
         mapOutputTemp1 = get_map_output(gear16Map, Motor_RPM)
         
-        if ( (Motor_Torque > mapOutputTemp1) & (gearChangeProtectDLY_output = 0) ) {
+        ;if ( (Motor_Torque > mapOutputTemp1) & (gearChangeProtectDLY_output = 0) ) {
         ;if ( (Motor_RPM < 2100) & (gearChangeProtectDLY_output = 0) ) {
             ; 1:18 is more efficient, so switch to 1:18
             
-            stateGearChange = 0x80
+        ;    stateGearChange = 0x80
             
-        }
+        ;}
         
         if (rcvDNRCommand = DNR_NEUTRAL) {          ; if received DNR command is Neutral
             rcvDNRCommand = 0     ; Clear Command from RDW scherm
