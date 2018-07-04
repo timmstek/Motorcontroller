@@ -1366,6 +1366,18 @@ faultHandling:
     }
     
     
+    ; Torque limiting
+    if (stateDNR = DRIVE118) {
+        if (motor_torque > MOTOR_TORQUE_LIM_THR) {
+            battDrivePowerLimTemp3 = map_two_points(motor_torque, MOTOR_TORQUE_LIM_THR, MOTOR_TORQUE_LIM_MAX, BATT_DRIVE_PWR_LIM_INIT, BATTERY_DRIVE_POWER_LIMIT_MIN)
+        } else {
+            battDrivePowerLimTemp3 = BATT_DRIVE_PWR_LIM_INIT
+        }
+    } else {
+        battDrivePowerLimTemp3 = BATT_DRIVE_PWR_LIM_INIT
+    }
+    
+    
     ; Drive limiting
     ; Based on Battery data
     if ( (battCurDeci > battCurLimDischargeMargin) & (battVoltDeci > battVoltLimDischargeMargin) ) {
