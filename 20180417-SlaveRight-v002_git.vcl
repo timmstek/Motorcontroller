@@ -660,7 +660,7 @@ DNR_statemachine:
     
     if (rcvBrake = 1) {
         vcl_brake = FULL_BRAKE
-        ;rcvThrottleCompensated = 0
+        rcvThrottleCompensated = 0
     } else {
         vcl_brake = 0
     }
@@ -738,13 +738,13 @@ calculateTemperature:
 setSmeshTo16Simple:
     
     
-    ;;;;; 6. Send ACK: Throttle has been reduced
+    ;;;;; 2. Send ACK: neutral braking is disabled
     
-    if ( (rcvStateGearChange = 0x65) & (stateGearChange <> 0x66) ) {
+    if ( (rcvStateGearChange = 0x61) & (stateGearChange <> 0x62) ) {
         
         Neutral_Braking_TrqM = 0
         
-        stateGearChange = 0x66
+        stateGearChange = 0x62
         
         send_mailbox(MAILBOX_SM_MISO2)
         
@@ -753,13 +753,13 @@ setSmeshTo16Simple:
     
     ;;;;; 12. Send ACK: procedure is finished
     
-    if ( (rcvStateGearChange = 0x6B) & (stateGearChange <> 0x6D) ) {
+    if ( (rcvStateGearChange = 0x65) & (stateGearChange <> 0x6D) ) {
         
-        stateGearChange = 0x6C
+        stateGearChange = 0x66
         
         send_mailbox(MAILBOX_SM_MISO2)
         
-        speed_to_rpm = 601          ; (G/d)*5305 ... 6/530*5305 ... One decimal
+        speed_to_rpm = 589          ; (G/d)*5305 ... 6/530*5305 ... One decimal
         Neutral_Braking_TrqM = NEUTRAL_BRAKING_INIT
         
         ; Gear state to complete
@@ -780,13 +780,13 @@ setSmeshTo16Simple:
 setSmeshTo118Simple:
 
     
-    ;;;;; 6. Send ACK: Throttle has been reduced
-
-    if ( (rcvStateGearChange = 0x85) & (stateGearChange <> 0x86) ) {
+    ;;;;; 2. Send ACK: neutral braking is disabled
+    
+    if ( (rcvStateGearChange = 0x81) & (stateGearChange <> 0x82) ) {
         
         Neutral_Braking_TrqM = 0
         
-        stateGearChange = 0x86
+        stateGearChange = 0x82
         
         send_mailbox(MAILBOX_SM_MISO2)
         
@@ -795,13 +795,13 @@ setSmeshTo118Simple:
     
     ;;;;; 12. Send ACK: procedure is finished
     
-    if ( (rcvStateGearChange = 0x8B) & (stateGearChange <> 0x8D) ) {
+    if ( (rcvStateGearChange = 0x85) & (stateGearChange <> 0x8D) ) {
         
-        stateGearChange = 0x8C
+        stateGearChange = 0x86
         
         send_mailbox(MAILBOX_SM_MISO2)
         
-        speed_to_rpm = 1802          ; (G/d)*5305 ... 18/530*5305 ... One decimal
+        speed_to_rpm = 1768          ; (G/d)*5305 ... 18/530*5305 ... One decimal
         Neutral_Braking_TrqM = NEUTRAL_BRAKING_INIT
         
         ; Gear state to complete
