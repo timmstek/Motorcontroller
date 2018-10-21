@@ -59,8 +59,12 @@ VCL_App_Ver = 012
 ; Enable Smesh control: Neutral, groot licht, knipperlicht links/rechts
 ; Tune cornering
 ; Tune Speed display during gear change
+; Tune throttle at low speeds
+; 
+; Add more comments in code
 
 ; TEST:
+; vehicle_speed: sends to infotainment as if it is abs value, but in DNR state machine as if it goes negative, when driving backwards
 ; current cutbacks
 ; ACK from master when slave sends error
 
@@ -85,53 +89,62 @@ VCL_App_Ver = 012
 ;							CONSTANTS
 ;****************************************************************
 
-; Input Current Limits
+;;;;; Input Current Limits
+; VCL OS will take care of some current protection
 Battery_Current_Limit_Ramp_Rate = 1
 Battery_Current_Limiter_enable = 1
 
 
+;;;;; General constants
 RESET_PASSWORD                  constant    141     ; password for "resetControllerRemote" to reset controller
 
 STARTUP_DELAY					constant    3000    ; time before startup system [ms]
 
 DEBOUNCE_INPUTS					constant    5		; this sets the debounce time for switch inputs to 20ms, 4mS/unit
 
-LOW_PRIO_LOOP_RATE              constant    100     ; 
+LOW_PRIO_LOOP_RATE              constant    100     ; Some code in the main loop will only be executed every ... ms.
 
-; CAN Settings
-CAN_DELAY_FOR_ACK               constant    500     ; in ms
-CAN_EMERGENCY_DELAY_ACK         constant    100
-CAN_LOWPRIORITY_RATE            constant    800     ; sets the cyclic rate of low priority mailboxes
+
+;;;;; Default power settings
+BATT_DRIVE_PWR_LIM_INIT         constant    125          ; per 10W, per 200mA, 125 per battery
+BATT_REGEN_PWR_LIM_INIT         constant    30          ; per 10W, per 200mA, 30 per battery
+
+NEUTRAL_BRAKING_INIT            constant    15000        ; In normal conditions, this is how hard the motors will 'brake' when throttle is released. 50% of 32767
+
+
+;;;;; CAN Settings
 CAN_CYCLIC_RATE					constant    25		; this sets the cyclic cycle to every 100 ms, 4mS/unit
+CAN_LOWPRIORITY_RATE            constant    800     ; sets the cyclic rate of low priority mailboxes
+
+; Action - Reaction
+CAN_DELAY_FOR_ACK               constant    500     ; Amount of time to wait for an ACK from other device, in [ms]
+CAN_EMERGENCY_DELAY_ACK         constant    100		; Amount of time to wait for an ACK from other device for emergency messages, in [ms]
+
+; Create errors
 CAN_BATTERY_RATE				constant	2000	; cyclic rate of the CAN messages of the batteries. When no messages from batteries are received, default parameters are set
-
 MULTIPLIER_CAN_NOTHING_RECEIVE  constant    2       ; Cyclic Rate times 2. If nothing is received from slave for this amount of time, create error
-CAN_NOTHING_RECEIVE_INIT        constant    1000
+CAN_NOTHING_RECEIVE_INIT        constant    1000	; At start-up wait a bit longer, before creating a CAN error
 
-; Fan Settings
+
+;;;;; Fan Settings
 FAN_TEMPERATURE_HYSTER          constant    5       ; Temperature should first drop this amount under threshold to turn off fans
 MOTOR_COOLDOWN_THOLD            constant    90      ; 40 +50, from this temperature in C Fans will turn on, offset -50 C 
 MOTOR_TEMP_FAN_MAX              constant    125     ; 75 +50, At this temperature of motor, fans are spinning at maximum, offset -50 C
 CONTROLLER_COOLDOWN_THOLD       constant    90      ; 40 +50, offset -50 C: 
 CONTR_TEMP_FAN_MAX              constant    115     ; 65 +50, offset -50 C
-FANSPEED_IDLE_IN                constant    25      ; In idle mode, fans will always run at 10%
-FANSPEED_IDLE_OUT               constant    0
+FANSPEED_IDLE_IN                constant    25      ; In idle mode, fans blowing inwards will always run at 25%
+FANSPEED_IDLE_OUT               constant    0		; In idle mode, fans blowin outwards will always run at 0%
 
 
-; Current settings
-BATT_DRIVE_PWR_LIM_INIT         constant    125          ; per 10W, per 200mA, 125 per battery
-BATT_REGEN_PWR_LIM_INIT         constant    30          ; per 10W, per 200mA, 30 per battery
-
-BATTERY_DRIVE_POWER_LIMIT_MIN   constant    0
-BATTERY_REGEN_POWER_LIMIT_MIN   constant    0
+;;;;; Power limiting settings
+BATTERY_DRIVE_POWER_LIMIT_MIN   constant    0			; When limiting the output power, this is the minimum, where the power will converge to. In drive mode
+BATTERY_REGEN_POWER_LIMIT_MIN   constant    0			; " " " in regen mode
 
 REDUCED_DRIVE_INPUT_CURLIM_PERC constant    60      ; Drive current limit is 60%, when fault is detected
 REDUCED_REGEN_INPUT_CURLIM_PERC constant    15      ; Regen current limit is 15%, when fault is detected
-REVERSE_THROTTLE_MULTIPLIER     constant    128     ; 90% of 128 = 115
-TIME_TO_FULL_LOS_FAULT          constant    10000    ; Time it takes to go to full effect of the reduced current limits
-                                                    ; Due to a fault, max 6000 ms
-                                                    
-NEUTRAL_BRAKING_INIT            constant    15000        ; 10% of 32767
+REVERSE_THROTTLE_MULTIPLIER     constant    115     ; 90% of 128 = 115
+TIME_TO_FULL_LOS_FAULT          constant    10000   ; Time it takes to go to full effect of the reduced current limits
+                                                    ; Due to a fault
                               
 BATT_CUR_LIM_FAULT_MARGIN_PERC       constant    80     ; Percentage of the current limit received from batteries. From this threshold drive limits are active
 BATT_VOLT_LIM_FAULT_MARGIN_PERC      constant    95     ; Percentage of the voltage limit received from batteries. From this threshold drive limits are active
@@ -140,42 +153,50 @@ BATT_TEMP_FAULT_MARGIN_PERC          constant    90     ; Percentage of the temp
 MOTOR_TORQUE_LIM_THR            constant    111         ; 1 decimal, in 1:18 torque should be limited to protect axis. 11.1*18 = 199.8 Nm
 MOTOR_TORQUE_LIM_MAX            constant    138         ; 1 decimal, in 1:18 torque limit is 13.8*18 = 248.4 Nm
 
-; DNR, Gear change and steering settings
-GEAR_CHANGE_BEFORE_DELAY        constant    400
-GEAR_CHANGE_AFTER_DELAY         constant    5000
-PROTECTION_DELAY_GRCHANGE       constant    2000    ; Allowed to only change gear once per second, in ms
-THROTTLE_MULTIP_REDUCE          constant    1       ; 26/128 = 0.2 multiplier for reducing throttle during gear change
-THROTTLE_MULTIP_INCREASE        constant    192     ; 192/128 = 1.5 multiplier for increasing throttle during gear change
-MAX_SPEED_CHANGE_DNR            constant    50      ; in km/h, with 1 decimal
 
+;;;;; DNR, Gear change and steering settings
+FULL_BRAKE                      constant    32767   ; On a scale of 0-32767, how hard controller will brake
+
+; Time constraints changing gear/DNR
+GEAR_CHANGE_BEFORE_DELAY        constant    400		; Time delay between initiating gear change and physically initiating gear change
+GEAR_CHANGE_AFTER_DELAY         constant    5000	; Time delay between initiating physical gear change and ending of the gear change
+PROTECTION_DELAY_GRCHANGE       constant    2000    ; Allowed to only change gear once per ... ms
+MAX_SPEED_CHANGE_DNR            constant    50      ; Max. speed at which the DNR may be changed, ie. Drive to Reverse. in km/h, with 1 decimal
+
+; RPM/Throttle constraints changing gear/DNR
 RPM_THRES_118to16               constant    2000	; RPM where smesh is going from 1:18 to 1:6
 THROT_THRES_118to16             constant    85      ; 20-150 if throttle signal is below this threshold, smesh changes from 1:18 to 1:6
 RPM_THRES_16to118				constant    400     ; RPM where smesh is going to 1:18, when throttle is pushed over the threshold. 600 rpm = 10 km/h
 THROT_THRES_16to118             constant    100     ; 20-150 if throttle signal is higher than this threshold, smesh changes to 1:6 when speed is lower than threshold
 
+; Throttle input signal -> output signal config
 THROTTLE_INPUT_THR_L			constant	20		; Threshold of the input signal from throttle. Minimum input signal
+THROTTLE_INPUT_M				constant	40		; First part of the throttle input signal will have another ramp on the input -> output map
 THROTTLE_INPUT_THR_H			constant	150		; Threshold of the input signal from throttle. Maximum input signal, max throttle
+THROTTLE_OUTPUT_M				constant	2100	; The ouput when the input has value THROTTLE_INPUT_M
 
+; Display speed correctly while changing gear
 CHECK_GR_CHANGE_TIMEOUT			constant	200		; Resets RPM threshold during gear change every ... ms
 FACTOR_DIFFERENCE_RPM_CHANGE_GEAR	constant	120	; When there is a difference of factor 2.48 [/s] in RPM during the gear change. 2.48 [/s] = 1.20 [/200ms]. Then that is considered to be the moment of change, with 2 decimals
 
+; Start-stop system
 IDLE_RPM_THRESHOLD              constant    20		; If RPM is lower than this value, interlock is turned on after some time
 IDLE_THROTTLE_THRESHOLD         constant    15      ; If throttle signal is below this value, interlock is turned on after some time
 TIME_TO_START_STOP              constant    10000   ; If car is idle for 10s, turn off interlock
 
-FULL_BRAKE                      constant    32767   ; On a scale of 0-32767, how hard controller will brake
-MAX_REVERSE_THROTTLE			constant	-32767	; The maximum throttle position for reverse driving
-
+; Steering compensation, e-Dif
 INIT_STEER_COMPENSATION         constant    240     ; 255 no effect, 0 full effect. At max steer angle, throttle multiplier has this value
 STEER_ANGLE_NO_EFFECT           constant    2       ; first 2 degrees has no effect on the compensation
 HIGH_PEDAL_DISABLE_THRESHOLD    constant    20      ; 0-255, When going into drive mode, throttle has to be reduced below this value
 
-; Received command for DNR
+
+;;;;; STATES
+; CAN messages
 DNR_DRIVE                       constant    1       ; CAN code for Drive
 DNR_NEUTRAL                     constant    2       ; CAN code for Neutral
 DNR_REVERSE                     constant    3       ; CAN code for Reverse
 
-; STATES IN STATEMACHINE
+; Internal Statemachine
 NEUTRAL                         constant    0
 DRIVE16                         constant    2
 DRIVE118                        constant    3
@@ -195,98 +216,109 @@ BRAKE                           constant    8
 ;							VARIABLES
 ;****************************************************************
 
+;;;;; Power user variables
 ; Accesible from programmer handheld (max. 100 user, 10 bit)
+; Can be saved to non-volatile memory
 
-keySwitchHardResetComplete		alias P_User1		;Can be saved to non-volatile memory
+keySwitchHardResetComplete		alias P_User1		; System had a hard reset, due to a fault, when the keySwitch was turned off
 
-;Auto user variables (max. 300 user, 16 bit)
+;;;;; Auto user variables (max. 300 user, 16 bit)
 
-create resetControllerRemote variable
+create resetControllerRemote variable			; When this variable is set to PASSWORD, then the system will reset
 
-create rcvStateGearChange variable            ; Smesh enabled, received from Right Motorcontroller
+create rcvStateGearChange variable				; Smesh state, received from Right Motorcontroller
 
-create rcvSystemAction variable
+create rcvSystemAction variable					; Received safety actions from slave, due to errors
 
-create HPO variable
+create HPO variable								; High Pedal Output, prevent throttle to be high, when switching to Drive mode
 
 ;-------------- CAN ---------------
+; Batteries
+create BATTERY_CAN_CONNECTED variable			; Checks whether batteries are connected over CAN
 
-create BATTERY_CAN_CONNECTED variable
+; Faults
+create riMcFaultSystemACK variable				; Slave copies the errors from master
+create riMcSystemActionACK variable				; Slave copies the safety actions, due to errors, from master
+create rcvFaultSystemDisplayACK variable		; Infotainment copies errors from Motor controller
 
-create riMcFaultSystemACK variable
-create riMcSystemActionACK variable
-create rcvFaultSystemDisplayACK variable
+; States
+create interlockXMT variable					; Send interlock state to slave
 
-create interlockXMT variable
+; Infotainment
+create vehicleSpeedDisplay variable				; 0-255, abs value of speed
+create torqueDisplay variable					; 0-255, per [Nm]
 
-create vehicleSpeedDisplay variable
-create torqueDisplay variable
+; Init
+create rcvRequestSlaveParam variable			; Indicates which batch of parameters will be transfered
 
-create rcvRequestSlaveParam variable
+create XMT_BATT_DRIVE_PWR_LIM_INIT variable		; The initial value of the drive power limit
+create NEUTRAL_BRAKING_INIT_VARIABLE variable	; " " " Regen power limit
 
-create XMT_BATT_DRIVE_PWR_LIM_INIT variable
-create NEUTRAL_BRAKING_INIT_VARIABLE variable
-
-create Slave_Param_Var1 variable
+create Slave_Param_Var1 variable				; The 4 parameters transfered to slave
 create Slave_Param_Var2 variable
 create Slave_Param_Var3 variable
 create Slave_Param_Var4 variable
 
 ;-------------- Temporaries ---------------
 
-create  mapOutputTemp1   variable
-create  calculationTemp1  variable
-create  leMcThrottleTemp   variable
-create  riMcThrottleTemp    variable
+create  mapOutputTemp1   variable				; Temporary map output
+create  calculationTemp1  variable				; Temporary calculation result
+create  leMcThrottleTemp   variable				; Temporary left throttle signal
+create  riMcThrottleTemp    variable			; Temporary right throttle signal
 
 create testTorque variable
 
 ;------------- Fan variables --------------
 
-create motorFanPerc variable
-create contrFanPerc variable
-create fanPercHighest variable
+create motorFanPerc variable					; Percentage of the fan speed, needed to cool the motor
+create contrFanPerc variable					; " " " the controller
+create fanPercHighest variable					; The highest fan speed needed (controller or motor)
 
-create riMcMotorTempDisplay variable
-create riMcContrTempDisplay variable
+create riMcMotorTempDisplay variable			; Motor temperature -50-205°C, of the slave controller
+create riMcContrTempDisplay variable			; Controller temperature -50-205°C, of the slave controller
 
-create contrTempDisplay variable
-create contrTempDisplayHighest variable
-create motorTempDisplay variable
-create motorTempDisplayHighest variable
+create motorTempDisplay variable				; Motor temperature -50-205°C, of this master controller
+create motorTempDisplayHighest variable			; Highest motor temperature, -50-205°C
+create contrTempDisplay variable				; Controller temperature -50-205°C, of this master controller
+create contrTempDisplayHighest variable			; Highest controller temperature, -50-205°C
 
 ;-------------- Start Stop ---------------
 
-create startStopInit variable
-create startStopActive variable
+create startStopInit variable					; Vehicle is standing still, Start-stop initiated
+create startStopActive variable					; Start-stop is active, after standing still for a while
 
 ;-------------- Batteries ---------------
+; Volt, Current and temperature for infotainment 
+create battTempDisplay variable					; Battery temperature, -50-205°C
+create battVoltDisplay variable					; Battery voltage, 0-256 [V]
+create battCurDisplay variable					; Battery current, -1024 - 1024 [A]
+create battVoltDeci variable					; Battery voltage, 1 decimal
+create battCurDeci variable						; Battery current, 1 decimal
 
-create battTempDisplay variable
-create battVoltDisplay variable
-create battCurDisplay variable
-create battVoltDeci variable
-create battCurDeci variable
-
-create rcvBattVolt variable					   ; Voltage range 0-512V variable -32767 - 32767
+; Volt and current raw data
+create rcvBattVolt variable					   	; Voltage range 0-512V variable -32767 - 32767
 create rcvBattCur variable                      ; Current range -1000 - 1000
 
+; Temperature raw data
 create rcvBattTempBMS variable                  ; Temperature per 1 degree C -32767 - 32767
 create rcvBattChargeUnderTemp variable          ; -128 - 127 C
 create rcvBattDischargeOverTemp variable        ; -128 - 127 C
-create rcvBattTempCell1 variable
-create rcvBattTempCell2 variable
+create rcvBattTempCell1 variable				; Temperature of cells
+create rcvBattTempCell2 variable				; temperature of other cells
 
-create battChargeUnderTempPrev variable
-create battDischargeOverTempPrev variable
-create battChargeUnderTempMargin variable
-create battDischargeOverTempMargin variable
+; Temperature limits
+create battChargeUnderTempPrev variable			; Previous threshold of low temperature, while charging
+create battDischargeOverTempPrev variable		; Previous threshold of high temperature, while discharging
+create battChargeUnderTempMargin variable		; Low temperature threshold, with margin, while charging
+create battDischargeOverTempMargin variable		; High temperature threshold, with margin, while dischargin
 
+; Temperature limits, raw data
 create rcvBattCurLimCharge variable               ; -512 - 512
 create rcvBattCurLimDischarge variable             ; -512 - 512
 create rcvBattVoltLimCharge variable              ; 0 - 256
 create rcvBattVoltLimDischarge variable            ; 0 - 256
 
+; Voltage and Current limits
 create battCurLimChargeMargin variable
 create battVoltLimChargeMargin variable
 create battCurLimDischargeMargin variable
@@ -302,11 +334,14 @@ create battVoltLimDischargePrev variable
 create battCurLimChargeDeci variable
 create battCurLimDischargeDeci variable
 
+; General info from battery
 create battSerial1 variable                        ; Serial number of Battery
 create battSerial2 variable                        
 create stateOfCharge variable                     ; Percentage of the capacity (0-100)
 create BMSState variable                           ; State of the BMS, charging, discharging, fault, etc.
 create packCapacity variable                       ; Pack capacity in mAh
+
+; Faults from battery
 create battErrorMsg1 variable                      ; Battery fault bits #1
     battTempAlarm                       bit        battErrorMsg1.1           ; Power stage temperature alarm1
     ;EMPTY
@@ -514,10 +549,11 @@ MAILBOX_TORADEX_INFO2_addr              constant 0x411
 
 
 ;------------------- Maps --------------------
-gear16Map                              alias MAP1
-gear118Map                             alias MAP2
-angle2MultiplierMap                    alias MAP3
-powerDissipContrMap                    alias MAP4
+throttle2VCLMap							alias MAP1
+angle2MultiplierMap						alias MAP2
+powerDissipContrMap						alias MAP3
+;gear16Map
+;gear118Map
 
 ;----------- User Defined Faults ------------
 
@@ -1633,24 +1669,37 @@ faultHandling:
 setup2DMap:
     
     ; When more torque is required at low speeds, change gear to 1:18
-    setup_map(gear16Map, 6,      ; Number of points
-        0, 18,            ; At     0 rpm, 18Nm /50
-     1500, 18,            ; At  1500 rpm, 18Nm /50
-     1800, 21,            ; At  1800 rpm, 20.5Nm /50
-     1950, 27,            ; At  1950 rpm, 26.5Nm /50
-     2000, 38,            ; At  2000 rpm, 38Nm /50
-     2050, 500,            ; From 2000 rpm gear should always stay in 1:6
-        0, 0)
-    
+    ;setup_map(gear16Map, 6,      ; Number of points
+    ;    0, 18,            ; At     0 rpm, 18Nm /50
+    ; 1500, 18,            ; At  1500 rpm, 18Nm /50
+    ; 1800, 21,            ; At  1800 rpm, 20.5Nm /50
+    ; 1950, 27,            ; At  1950 rpm, 26.5Nm /50
+    ; 2000, 38,            ; At  2000 rpm, 38Nm /50
+    ; 2050, 500,            ; From 2000 rpm gear should always stay in 1:6
+    ;    0, 0)
+    ;
     ; When torque is not needed or speed is too high, change gear to 1:6
-    setup_map(gear118Map, 5,      ; Number of points
-        0, 4,             ; At     0 rpm, 4Nm /50
-     4500, 4,             ; At  4500 rpm, 4Nm /50
-     5400, 5,             ; At  5400 rpm, 4.8Nm /50
-     6400, 9,             ; At  6400 rpm, 8.8Nm /50
-     6450, 500,            ; From 6450 rpm gear should always go to 1:6
+    ;setup_map(gear118Map, 5,      ; Number of points
+    ;    0, 4,             ; At     0 rpm, 4Nm /50
+    ; 4500, 4,             ; At  4500 rpm, 4Nm /50
+    ; 5400, 5,             ; At  5400 rpm, 4.8Nm /50
+    ; 6400, 9,             ; At  6400 rpm, 8.8Nm /50
+    ; 6450, 500,            ; From 6450 rpm gear should always go to 1:6
+    ;    0, 0,
+    ;    0, 0)
+	
+	
+	; Converting the input signal to the throttle signal 
+	setup_map(throttle2VCLMap, 3,      ; Number of points
+	   THROTTLE_INPUT_L, 0,
+       THROTTLE_INPUT_M, THROTTLE_OUTPUT_M,
+       THROTTLE_INPUT_H, 32767,
+        0, 0,
+        0, 0,
         0, 0,
         0, 0)
+		
+		
         
     ; Steering angle compensation
     setup_map(angle2MultiplierMap, 3,      ; Number of points
@@ -1943,12 +1992,12 @@ DNRStateMachine:
         }
         
         if ( HPO = 0 ) {
-            leMcThrottleTemp = map_two_points(rcvThrottle, THROTTLE_INPUT_THR_L, THROTTLE_INPUT_THR_H, 0, 32767)     ; Set throttle to position of pedal
+            leMcThrottleTemp = get_map_output(throttle2VCLMap, rcvThrottle)     ; Set throttle to position of pedal
             riMcThrottleTemp = leMcThrottleTemp
         } else if ( rcvThrottle < HIGH_PEDAL_DISABLE_THRESHOLD ) {
             ; HPO is still 1 and throttle is below threshold
             HPO = 0
-            leMcThrottleTemp = map_two_points(rcvThrottle, THROTTLE_INPUT_THR_L, THROTTLE_INPUT_THR_H, 0, 32767)     ; Set throttle to position of pedal
+            leMcThrottleTemp = get_map_output(throttle2VCLMap, rcvThrottle)     ; Set throttle to position of pedal
             riMcThrottleTemp = leMcThrottleTemp
         } else {
             ; HPO is active
@@ -1992,12 +2041,12 @@ DNRStateMachine:
         }
         
         if ( HPO = 0 ) {
-            leMcThrottleTemp = map_two_points(rcvThrottle, THROTTLE_INPUT_THR_L, THROTTLE_INPUT_THR_H, 0, 32767)     ; Set throttle to position of pedal
+            leMcThrottleTemp = get_map_output(throttle2VCLMap, rcvThrottle)     ; Set throttle to position of pedal
             riMcThrottleTemp = leMcThrottleTemp
         } else if ( rcvThrottle < HIGH_PEDAL_DISABLE_THRESHOLD ) {
             ; HPO is still 1 and throttle is below threshold
             HPO = 0
-            leMcThrottleTemp = map_two_points(rcvThrottle, THROTTLE_INPUT_THR_L, THROTTLE_INPUT_THR_H, 0, 32767)     ; Set throttle to position of pedal
+            leMcThrottleTemp = get_map_output(throttle2VCLMap, rcvThrottle)     ; Set throttle to position of pedal
             riMcThrottleTemp = leMcThrottleTemp
         } else {
             ; HPO is active
@@ -2037,7 +2086,7 @@ DNRStateMachine:
         }
         
         if ( HPO = 0 ) {
-            mapOutputTemp1 = map_two_points(rcvThrottle, THROTTLE_INPUT_THR_L, THROTTLE_INPUT_THR_H, 0, MAX_REVERSE_THROTTLE)
+            mapOutputTemp1 = (-1) * get_map_output(throttle2VCLMap, rcvThrottle)
             leMcThrottleTemp = get_muldiv(MTD1, mapOutputTemp1, REVERSE_THROTTLE_MULTIPLIER, 128)     ; Set throttle to position of pedal
             riMcThrottleTemp = leMcThrottleTemp
         } else if ( rcvThrottle < HIGH_PEDAL_DISABLE_THRESHOLD ) {
@@ -2045,7 +2094,7 @@ DNRStateMachine:
             ; HPO is still 1 and throttle is below threshold
             HPO = 0
 			
-            mapOutputTemp1 = map_two_points(rcvThrottle, THROTTLE_INPUT_THR_L, THROTTLE_INPUT_THR_H, 0, MAX_REVERSE_THROTTLE)
+            mapOutputTemp1 = (-1) * get_map_output(throttle2VCLMap, rcvThrottle)
             leMcThrottleTemp = get_muldiv(MTD1, mapOutputTemp1, REVERSE_THROTTLE_MULTIPLIER, 128)     ; Set throttle to position of pedal
             riMcThrottleTemp = leMcThrottleTemp
         }
@@ -2192,11 +2241,11 @@ setSmeshTo16:
 	if ((stateDNR = DRIVE118) | (stateDNR = DRIVE16)) {
 		; In Drive mode, so apply Throttle
 		leMcThrottleTemp = map_two_points(rcvThrottle, 20, 255, 0, 32767)
-		riMcThrottleTemp = map_two_points(rcvThrottle, THROTTLE_INPUT_THR_L, THROTTLE_INPUT_THR_H, 0, 32767)
+		riMcThrottleTemp = get_map_output(throttle2VCLMap, rcvThrottle)
 	} else if (stateDNR = REVERSE) {
 		; In Reverse mode, so apply Throttle in reverse direction
 		leMcThrottleTemp = map_two_points(rcvThrottle, 20, 255, 0, -32767)
-		riMcThrottleTemp = map_two_points(rcvThrottle, THROTTLE_INPUT_THR_L, THROTTLE_INPUT_THR_H, 0, MAX_REVERSE_THROTTLE)
+		riMcThrottleTemp = (-1) * get_map_output(throttle2VCLMap, rcvThrottle)
 	}
     
 	
@@ -2346,11 +2395,11 @@ setSmeshTo118:
 	if ((stateDNR = DRIVE118) | (stateDNR = DRIVE16)) {
 		; In Drive mode, so apply Throttle
 		leMcThrottleTemp = map_two_points(rcvThrottle, 20, 255, 0, 32767)
-		riMcThrottleTemp = map_two_points(rcvThrottle, THROTTLE_INPUT_THR_L, THROTTLE_INPUT_THR_H, 0, 32767)
+		riMcThrottleTemp = get_map_output(throttle2VCLMap, rcvThrottle)
 	} else if (stateDNR = REVERSE) {
 		; In Reverse mode, so apply Throttle in reverse direction
 		leMcThrottleTemp = map_two_points(rcvThrottle, 20, 255, 0, -32767)
-		riMcThrottleTemp = map_two_points(rcvThrottle, THROTTLE_INPUT_THR_L, THROTTLE_INPUT_THR_H, 0, MAX_REVERSE_THROTTLE)
+		riMcThrottleTemp = (-1) * get_map_output(throttle2VCLMap, rcvThrottle)
 	}
     
     
