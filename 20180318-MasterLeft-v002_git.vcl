@@ -67,6 +67,7 @@ VCL_App_Ver = 012
 ; vehicle_speed: sends to infotainment as if it is abs value, but in DNR state machine as if it goes negative, when driving backwards
 ; current cutbacks
 ; ACK from master when slave sends error
+; Negative multiplier: get_muldiv(MTD1, mapOutputTemp1, -REVERSE_THROTTLE_MULTIPLIER, 128)
 
 ; In Car:
 ; - Torque limiting
@@ -170,9 +171,9 @@ RPM_THRES_16to118				constant    400     ; RPM where smesh is going to 1:18, whe
 THROT_THRES_16to118             constant    100     ; 20-150 if throttle signal is higher than this threshold, smesh changes to 1:6 when speed is lower than threshold
 
 ; Throttle input signal -> output signal config
-THROTTLE_INPUT_THR_L			constant	20		; Threshold of the input signal from throttle. Minimum input signal
+THROTTLE_INPUT_L				constant	20		; Threshold of the input signal from throttle. Minimum input signal
 THROTTLE_INPUT_M				constant	40		; First part of the throttle input signal will have another ramp on the input -> output map
-THROTTLE_INPUT_THR_H			constant	150		; Threshold of the input signal from throttle. Maximum input signal, max throttle
+THROTTLE_INPUT_H				constant	150		; Threshold of the input signal from throttle. Maximum input signal, max throttle
 THROTTLE_OUTPUT_M				constant	2100	; The ouput when the input has value THROTTLE_INPUT_M
 
 ; Display speed correctly while changing gear
@@ -428,6 +429,7 @@ rcvDNRCommand                       alias      user52           			; DNR command
 rcvThrottle                         alias      user53           			; Throttle pedal state
 rcvBrake                            alias      user54           			; Brake pedal pushed
 faultCNTGearChange                  alias      user55                     ; Counts number of times gear change has fault    
+lastRPMThreshold					alias	   user56						; Holds the last threshold of change in RPM during a gear change. Used for displaying correct speed in infotainment.
 
 
 ; Temperature
@@ -1914,9 +1916,24 @@ DNRStateMachine:
     
     
     if ( (stateGearChange >= 0x60) & (stateGearChange < 0x6D) ) {
+	
+		; Apply throttle when in a drive state
+		
+		if ((stateDNR = DRIVE118) | (stateDNR = DRIVE16)) {
+			; In Drive mode, so apply Throttle
+			leMcThrottleTemp = get_map_output(throttle2VCLMap, rcvThrottle)
+			riMcThrottleTemp = leMcThrottleTemp
+		} else if (stateDNR = REVERSE) {
+			; In Reverse mode, so apply Throttle in reverse direction
+			mapOutputTemp1 = get_map_output(throttle2VCLMap, rcvThrottle)
+			leMcThrottleTemp = get_muldiv(MTD1, mapOutputTemp1, -REVERSE_THROTTLE_MULTIPLIER, 128)     ; Set throttle to position of pedal
+			riMcThrottleTemp = leMcThrottleTemp
+		}
         
+		; Perform gear change
         call setSmeshTo16
         
+		
         if (stateGearChange = 0x6D) {
             ; Gear change is finished
             faultCNTGearChange = 0
@@ -1926,6 +1943,7 @@ DNRStateMachine:
                 stateDNR= DRIVE16
             }
         } else if (stateGearChange = 0xFF) {
+			; Something went wrong
             faultCNTGearChange = faultCNTGearChange + 1
             Neutral_Braking_TrqM = NEUTRAL_BRAKING_INIT
             stateGearChange = 0x60
@@ -1935,9 +1953,24 @@ DNRStateMachine:
         
     } else if ( (stateGearChange >= 0x80) & (stateGearChange < 0x8D) ) {
         ;; Changing gear to 1:18
+		
+		; Apply throttle when in a drive state
+		
+		if ((stateDNR = DRIVE118) | (stateDNR = DRIVE16)) {
+			; In Drive mode, so apply Throttle
+			leMcThrottleTemp = get_map_output(throttle2VCLMap, rcvThrottle)
+			riMcThrottleTemp = leMcThrottleTemp
+		} else if (stateDNR = REVERSE) {
+			; In Reverse mode, so apply Throttle in reverse direction
+			mapOutputTemp1 = get_map_output(throttle2VCLMap, rcvThrottle)
+			leMcThrottleTemp = get_muldiv(MTD1, mapOutputTemp1, -REVERSE_THROTTLE_MULTIPLIER, 128)     ; Set throttle to position of pedal
+			riMcThrottleTemp = leMcThrottleTemp
+		}
         
+		; Perform gear change
         call setSmeshTo118
         
+		
         if (stateGearChange = 0x8D) {
             ; Gear change is finished
             faultCNTGearChange = 0
@@ -1952,6 +1985,7 @@ DNRStateMachine:
                 ; Just go back to the main state
             }
         } else if (stateGearChange = 0xFF) {
+			; Something went wrong
             faultCNTGearChange = faultCNTGearChange + 1
             Neutral_Braking_TrqM = NEUTRAL_BRAKING_INIT
             stateGearChange = 0x80
@@ -2086,16 +2120,16 @@ DNRStateMachine:
         }
         
         if ( HPO = 0 ) {
-            mapOutputTemp1 = (-1) * get_map_output(throttle2VCLMap, rcvThrottle)
-            leMcThrottleTemp = get_muldiv(MTD1, mapOutputTemp1, REVERSE_THROTTLE_MULTIPLIER, 128)     ; Set throttle to position of pedal
+            mapOutputTemp1 = get_map_output(throttle2VCLMap, rcvThrottle)
+            leMcThrottleTemp = get_muldiv(MTD1, mapOutputTemp1, -REVERSE_THROTTLE_MULTIPLIER, 128)     ; Set throttle to position of pedal
             riMcThrottleTemp = leMcThrottleTemp
         } else if ( rcvThrottle < HIGH_PEDAL_DISABLE_THRESHOLD ) {
             
             ; HPO is still 1 and throttle is below threshold
             HPO = 0
 			
-            mapOutputTemp1 = (-1) * get_map_output(throttle2VCLMap, rcvThrottle)
-            leMcThrottleTemp = get_muldiv(MTD1, mapOutputTemp1, REVERSE_THROTTLE_MULTIPLIER, 128)     ; Set throttle to position of pedal
+            mapOutputTemp1 = get_map_output(throttle2VCLMap, rcvThrottle)
+            leMcThrottleTemp = get_muldiv(MTD1, mapOutputTemp1, -REVERSE_THROTTLE_MULTIPLIER, 128)     ; Set throttle to position of pedal
             riMcThrottleTemp = leMcThrottleTemp
         }
         
@@ -2234,19 +2268,6 @@ setSmeshTo16:
         send_mailbox(MAILBOX_SM_MOSI3)
         setup_delay(smeshDLY, CAN_DELAY_FOR_ACK)
     }
-	
-	
-	;;;;; Apply throttle when in a drive state
-	
-	if ((stateDNR = DRIVE118) | (stateDNR = DRIVE16)) {
-		; In Drive mode, so apply Throttle
-		leMcThrottleTemp = map_two_points(rcvThrottle, 20, 255, 0, 32767)
-		riMcThrottleTemp = get_map_output(throttle2VCLMap, rcvThrottle)
-	} else if (stateDNR = REVERSE) {
-		; In Reverse mode, so apply Throttle in reverse direction
-		leMcThrottleTemp = map_two_points(rcvThrottle, 20, 255, 0, -32767)
-		riMcThrottleTemp = (-1) * get_map_output(throttle2VCLMap, rcvThrottle)
-	}
     
 	
     ;;;;; 1. Disable neutral braking
@@ -2388,19 +2409,6 @@ setSmeshTo118:
         send_mailbox(MAILBOX_SM_MOSI3)
         setup_delay(smeshDLY, CAN_DELAY_FOR_ACK)
     }
-	
-	
-	;;;;; Apply throttle when in a drive state
-	
-	if ((stateDNR = DRIVE118) | (stateDNR = DRIVE16)) {
-		; In Drive mode, so apply Throttle
-		leMcThrottleTemp = map_two_points(rcvThrottle, 20, 255, 0, 32767)
-		riMcThrottleTemp = get_map_output(throttle2VCLMap, rcvThrottle)
-	} else if (stateDNR = REVERSE) {
-		; In Reverse mode, so apply Throttle in reverse direction
-		leMcThrottleTemp = map_two_points(rcvThrottle, 20, 255, 0, -32767)
-		riMcThrottleTemp = (-1) * get_map_output(throttle2VCLMap, rcvThrottle)
-	}
     
     
     ;;;;; 1. Disable neutral braking
