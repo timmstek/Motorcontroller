@@ -707,8 +707,8 @@ DNR_statemachine:
     } else {
         ; When in neutral or undefined state, set throttle to zero
         
-        if (Neutral_Braking_TrqM <> NEUTRAL_BRAKING_INIT) {
-            Neutral_Braking_TrqM = NEUTRAL_BRAKING_INIT
+        if (Neutral_Braking_TrqM <> 0) {
+            Neutral_Braking_TrqM = 0
         }
         
         VCLThrottleTemp = 0
