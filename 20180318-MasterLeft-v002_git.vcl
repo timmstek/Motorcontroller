@@ -671,22 +671,23 @@ driveFaultRMP_hold              alias RMP2_hold
 setup_delay(startupDLY, STARTUP_DELAY)
 while (startupDLY_output <> 0) {}			; Wait 500ms before start
 
-; setup inputs
+; Setup inputs
 setup_switches(DEBOUNCE_INPUTS)
 
-; Ramp
+; Ramps for protection timers
 setup_ramp(regenFaultRMP, 0, 0, 1)         ; RMP#, Initial value = 0, Move, rate 1/ms
 set_ramp_target(regenFaultRMP, 0)          ; Target init is 0ms
 
 setup_ramp(driveFaultRMP, 0, 0, 1)         ; RMP#, Initial value = 0, Move, rate 1/ms
 set_ramp_target(driveFaultRMP, 0)          ; Target init is 0ms
 
-;Initiate sytems
+setup_delay(communicationSlaveErrorDLY, CAN_NOTHING_RECEIVE_INIT)		; At startup the timer to check communication with slave is a bit longer.
+
+; Initiate sytems
 call startupCANSystem 		;setup and start the CAN communications system
 call setup2DMap
 
-setup_delay(communicationSlaveErrorDLY, CAN_NOTHING_RECEIVE_INIT)
-
+; Initiate variables
 MAX_STEER_COMPENSATION = INIT_STEER_COMPENSATION            ; 120/255 = 47% reduction on inner wheel with max steering
 
 XMT_BATT_DRIVE_PWR_LIM_INIT = BATT_DRIVE_PWR_LIM_INIT
@@ -698,16 +699,17 @@ Battery_Power_Limit = BATT_DRIVE_PWR_LIM_INIT
 Neutral_Braking_TrqM = NEUTRAL_BRAKING_INIT
 NEUTRAL_BRAKING_INIT_VARIABLE = NEUTRAL_BRAKING_INIT
 
-; For testing purposes
+BATTERY_CAN_CONNECTED = 0
+
+; Set default values for battery params, so no safety measure is enabled by default
+call setBatteryDefaultParam
+
+; For testing purposes, model inputs
 rcvSteerangle = 125
 ;rcvKeySwitch = 1
 rcvThrottle = 0
 ;rcvDNRCommand = 1
 startStopActive = 0
-
-BATTERY_CAN_CONNECTED = 0
-
-call setBatteryDefaultParam
 
 
 
@@ -729,26 +731,34 @@ call setBatteryDefaultParam
 
 
 mainLoop:
-    
+
+    ; Reset controller when resetControllerRemote is set to the password over CAN, or via the programmer
     if (resetControllerRemote = RESET_PASSWORD) {
         reset_controller()
     }
     
+	; Check system conditions and control power limits
     call faultHandling
     
+	; Perform calculations at receiving particular CAN messages
     call checkCANMailboxes
     
+	; Statemachine of the DNR-buttons, changing gear and behaviour of the throttle
     call DNRStateMachine
     
+	; Low prio tasks are executed less often
     if (lowPrioLoopDLY_output = 0) {
         
+		; Control the fans in the motor casing according to the temperature
         call controlFans
-    
+		
+		; Calculate efficiency of drivetrain, and power consumption for infotainment
         call calculateEfficiency
         
         setup_delay(lowPrioLoopDLY, LOW_PRIO_LOOP_RATE)
     }
     
+	; For testing puposes
     testTorque = Motor_Torque
     
     goto mainLoop 
@@ -779,8 +789,8 @@ startupCANSystem:
    			; Set Message T ype and Master ID to 0, and put Slave ID to pre-defined 11bit identifier.
    			;
 
-    suppress_CANopen_init = 0			;first undo suppress, then startup CAN, then disable CANopen
-    disable_CANopen_pdo()				; disables OS PDO mapping and frees 
+    suppress_CANopen_init = 0			; First undo suppress, then startup CAN, then disable CANopen
+    disable_CANopen_pdo()				; Disables OS PDO mapping and frees 
 
     setup_CAN(CAN_BAUD_RATE, 0, 0, -1, 0)		;(Baud, Sync, Reserved[0], Slave ID, Restart)
 												;Baudrate = 500KB/s setting, no Sync, Not Used, Not Used, Auto Restart
@@ -788,88 +798,85 @@ startupCANSystem:
 
 
    			; MAILBOX 1
-   			; Purpose:		Receive information: Torque, speed, Temperature motor/controller, Smesh enabled
+   			; Purpose:		Receive information: Errors, temperature, gear change state
    			; Type:			PDO MISO1
    			; Partner:		Slave Motorcontroller
 
     setup_mailbox(MAILBOX_SM_MISO1, 0, 0, MAILBOX_SM_MISO1_addr, C_EVENT, C_RCV, 0, 0)
 
     setup_mailbox_data(MAILBOX_SM_MISO1, 6,			
-        @rcvSystemAction,				
+        @rcvSystemAction,				; Actions due to errors of slave
         @rcvSystemAction + USEHB,
         @riMcMotorTempDisplay,			; Motor temperature -50-205°C
         @riMcContrTempDisplay,          ; Controller temperature  -50-205°C
-        @rcvStateGearChange,		    ; Smesh state
-        @rcvRiMcFaultSystem,
+        @rcvStateGearChange,		    ; Gear change state
+        @rcvRiMcFaultSystem,			; Faults/Errors in slave controller
         0,
         0)
         
         
-        
-        
             ; MAILBOX 2
-   			; Purpose:		Send information: Torque, Smesh change gear, max speed, regen, commands
+   			; Purpose:		Send information: Throttle, gear change state, power limit, DNR state
    			; Type:			PDO MOSI1
    			; Partner:		Slave Motorcontroller
 
     setup_mailbox(MAILBOX_SM_MOSI1, 0, 0, MAILBOX_SM_MOSI1_addr, C_CYCLIC, C_XMT, 0, 0)
 
     setup_mailbox_data(MAILBOX_SM_MOSI1, 6,
-        @riMcThrottleComp,			; Torque for right motorcontroller
+        @riMcThrottleComp,				; Throttle for right motorcontroller
         @riMcThrottleComp + USEHB, 
-        @stateGearChange,			        ; Command to change gear
-        @riMcBattDrivePowerLim,						; Set max speed
+        @stateGearChange,			    ; Gear change state
+        @riMcBattDrivePowerLim,			; Power limit
         @riMcBattDrivePowerLim + USEHB,
-        @DNRCommand,
+        @DNRCommand,					; DNR state
         0,
         0)
 		
-		
 
-
-   			; MAILBOX 3
-   			; Purpose:		Send information: 
+  			; MAILBOX 3
+   			; Purpose:		Send information: Brake signal, interlock state
    			; Type:			PDO MOSI2
    			; Partner:		Slave Motorcontroller
             
     setup_mailbox(MAILBOX_SM_MOSI2, 0, 0, MAILBOX_SM_MOSI2_addr, C_CYCLIC, C_XMT, 0, 0)
     setup_mailbox_data(MAILBOX_SM_MOSI2, 2,
-        @rcvBrake,
-        @interlockXMT,
+        @rcvBrake,						; Brake signal 0-1
+        @interlockXMT,					; Interlock state OFF-ON
         0,
         0,
         0,
         0,
         0,
         0)
-
+		
 
    			; MAILBOX 4
-   			; Purpose:		Send information: While gear change, valuable information: 
+   			; Purpose:		Send information: During changing gear, send: Throttle, gear change state, reset command, power limit
    			; Type:			PDO MOSI3
    			; Partner:		Slave Motorcontroller
             
     setup_mailbox(MAILBOX_SM_MOSI3, 0, 0, MAILBOX_SM_MOSI3_addr, C_EVENT, C_XMT, 0, 0)
 
     setup_mailbox_data(MAILBOX_SM_MOSI3, 6, 		
-        @riMcThrottleComp,			
+        @riMcThrottleComp,				; Throttle for right motorcontroller
         @riMcThrottleComp + USEHB,
-        @stateGearChange,				
-        @resetControllerRemote, 
-        @riMcBattDrivePowerLim,						; Set max speed
+        @stateGearChange,				; Gear change state
+        @resetControllerRemote, 		; Reset command
+        @riMcBattDrivePowerLim,			; Power limit
         @riMcBattDrivePowerLim + USEHB,
         0,
         0)
-            
+        
+		
             ; MAILBOX 5
-   			; Purpose:		Receive information:
+   			; Purpose:		Receive information: During changing gear, receive: gear change state
    			; Type:			PDO MISO2
    			; Partner:		Slave Motorcontroller
          
     setup_mailbox(MAILBOX_SM_MISO2, 0, 0, MAILBOX_SM_MISO2_addr, C_EVENT, C_RCV, 0, 0)
 
     setup_mailbox_data(MAILBOX_SM_MISO2, 1, 		
-        @rcvStateGearChange,			; Motor torque
+        @rcvStateGearChange,			; Gear change state of slave
         0, 
         0,				
         0, 
@@ -878,18 +885,20 @@ startupCANSystem:
 		0,
 		0)
 
-
+		
+		
+		
 
    			; MAILBOX 11
-   			; Purpose:		Receive information: DNR
+   			; Purpose:		Receive information: DNR, Keyswitch state, Steering angle
    			; Type:			PDO1
    			; Partner:		RDW Scherm
 
     setup_mailbox(MAILBOX_RDW_RCV, 0, 0, MAILBOX_RDW_RCV_addr, C_EVENT, C_RCV, 0, 0)
     setup_mailbox_data(MAILBOX_RDW_RCV, 3, 			; DNR switch state
-        @rcvDNRCommand,
-		@rcvKeySwitch,
-		@rcvSteerangle,
+        @rcvDNRCommand,					; DNR buttons state
+		@rcvKeySwitch,					; Key switch state
+		@rcvSteerangle,					; Steering angle 0-255
         0, 
 		0,
 		0,
@@ -898,26 +907,28 @@ startupCANSystem:
 
 
    			; MAILBOX 12
-   			; Purpose:		Send information: Speed, temperature motor & controller, efficiency
+   			; Purpose:		Send information: Speed, efficiency, power consumption, SoC, temperature errors batteries, regen power
    			; Type:			PDO2
    			; Partner:		RDW Scherm
 
     setup_mailbox(MAILBOX_RDW_XMT, 0, 0, MAILBOX_RDW_XMT_addr, C_CYCLIC, C_XMT, 0, 0)
     setup_mailbox_data(MAILBOX_RDW_XMT, 6,
-        @vehicleSpeedDisplay,		; Speed of the wheels
-        @leMcEfficiencyPerc,
+        @vehicleSpeedDisplay,		; Speed of the wheels 0-255
+        @leMcEfficiencyPerc,		; Efficiency of drive train
         @powerInDisplay,            ; Power consumption 0-150, 1 decimal [kW]
-        @stateOfCharge,
+        @stateOfCharge,				; State of charge of the batteries
         @stateDNR,			        ; Temperature errors from Batteries
-        @regenPower,
-        0,                          ; Regen, Eco or power region
+        @regenPower,				; Regen, Eco or power region
+        0,
 		0)
 
+		
+		
 
    			; MAILBOX 13
-   			; Purpose:		receive information: rcvSteerangle, throttle, brake
+   			; Purpose:		receive information: Throttle
    			; Type:			PDO3
-   			; Partner:		Interieur Verlichting?
+   			; Partner:		Pedal inputs
 
     setup_mailbox(MAILBOX_DRVSEN_RCV, 0, 0, MAILBOX_DRVSEN_RCV_addr, C_EVENT, C_RCV, 0, 0)
     setup_mailbox_data(MAILBOX_DRVSEN_RCV, 1, 		; Efficiency
@@ -930,6 +941,8 @@ startupCANSystem:
         0,
         0)
 
+		
+		
 
    			; MAILBOX 14
    			; Purpose:		receive information: Brake
@@ -937,8 +950,8 @@ startupCANSystem:
    			; Partner:		Achterlichten
 
     setup_mailbox(MAILBOX_BRK_RCV, 0, 0, MAILBOX_BRK_RCV_addr, C_EVENT, C_RCV, 0, 0)
-    setup_mailbox_data(MAILBOX_BRK_RCV, 1, 		; Brake pedal state input
-        @rcvBrake,
+    setup_mailbox_data(MAILBOX_BRK_RCV, 1,
+        @rcvBrake,						; Brake pedal state input
 		0,
 		0,
 		0,
@@ -947,6 +960,8 @@ startupCANSystem:
 		0,
 		0)
 
+		
+		
 
    			; MAILBOX 15
    			; Purpose:		receive information: State and state of charge
@@ -960,7 +975,7 @@ startupCANSystem:
         @battSerial2, 
         @battSerial2 + USEHB,
         @stateOfCharge,				; Percentage of the capacity 
-        @BMSState,						; State of BMS: 1-4 init, 5 idle, 6 discharging, 7 charging, 10 fault, 11 critical error, 99 prepare deepsleep, 100 deepsleep
+        @BMSState,					; State of BMS: 1-4 init, 5 idle, 6 discharging, 7 charging, 10 fault, 11 critical error, 99 prepare deepsleep, 100 deepsleep
         @packCapacity, 				; Capacity remaining in pack, 0 - 65535 mAh
         @packCapacity + USEHB)
 		
@@ -1032,6 +1047,8 @@ startupCANSystem:
         @rcvBattVoltLimDischarge,            ; 0 - 256
         0)
         
+		
+		
         
             ; MAILBOX 20
    			; Purpose:		Send information: Error messages of temperature, current flow, voltage
@@ -1049,8 +1066,9 @@ startupCANSystem:
         0,
         0)
         
+		
             ; MAILBOX 21
-   			; Purpose:		receive information: Error messages of temperature, current flow, voltage
+   			; Purpose:		receive information: ACK on Error messages of temperature, current flow, voltage
    			; Type:			PDO6
    			; Partner:		RDW Scherm
 
@@ -1065,6 +1083,8 @@ startupCANSystem:
         0,
         0)
         
+		
+		
         
             ; MAILBOX 22
    			; Purpose:		receive information: Error messages from slave controller
@@ -1073,8 +1093,8 @@ startupCANSystem:
 
     setup_mailbox(MAILBOX_ERROR_MESSAGES_RCV_RM, 0, 0, MAILBOX_ERROR_MESSAGES_RCV_RM_addr, C_EVENT, C_RCV, 0, 0)
     setup_mailbox_data(MAILBOX_ERROR_MESSAGES_RCV_RM, 3, 		
-        @rcvRiMcFaultSystem,
-        @rcvSystemAction,				
+        @rcvRiMcFaultSystem,					; Faults/Errors in right controller
+        @rcvSystemAction,						; Actions due to errors in right controller
         @rcvSystemAction + USEHB, 
         0,
         0,
@@ -1107,7 +1127,7 @@ startupCANSystem:
 
     setup_mailbox(MAILBOX_MISO_REQUEST_PARAM, 0, 0, MAILBOX_MISO_REQUEST_PARAM_addr, C_EVENT, C_RCV, 0, 0)
     setup_mailbox_data(MAILBOX_MISO_REQUEST_PARAM, 1, 		
-        @rcvRequestSlaveParam,
+        @rcvRequestSlaveParam,					; 1-2 Indicates which set of variables is requested
         0,
         0,
         0,
@@ -1115,6 +1135,7 @@ startupCANSystem:
         0,
         0,
         0)
+		
         
             ; MAILBOX 25
    			; Purpose:		send information: Parameters at Init
@@ -1133,6 +1154,8 @@ startupCANSystem:
         @Slave_Param_Var4 + USEHB)
         
 
+		
+		
             ; MAILBOX 26
    			; Purpose:		send information: Data for display in dashboard
    			; Type:			
@@ -1140,13 +1163,13 @@ startupCANSystem:
 
     setup_mailbox(MAILBOX_TORADEX_INFO1, 0, 0, MAILBOX_TORADEX_INFO1_addr, C_EVENT, C_XMT, 0, 0)
     setup_mailbox_data(MAILBOX_TORADEX_INFO1, 8, 		
-        @motorTempDisplay,
-        @riMcMotorTempDisplay,				
-        @contrTempDisplay,
-        @riMcContrTempDisplay,
-        @battTempDisplay,
-        @battVoltDisplay,
-        @battCurDisplay,
+        @motorTempDisplay,						; Motor temperature -50-205°C
+        @riMcMotorTempDisplay,					; Right motor temperature -50-205°C
+        @contrTempDisplay,						; Controller temperature -50-205°C
+        @riMcContrTempDisplay,					; Right controller temperature -50-205°C
+        @battTempDisplay,						; Battery temperature -50-205°C
+        @battVoltDisplay,						; Battery voltage 0-255 V
+        @battCurDisplay,						; Battery current, -1024 - 1024 [A]
         @battCurDisplay + USEHB)
         
         
@@ -1157,7 +1180,7 @@ startupCANSystem:
 
     setup_mailbox(MAILBOX_TORADEX_INFO2, 0, 0, MAILBOX_TORADEX_INFO2_addr, C_EVENT, C_XMT, 0, 0)
     setup_mailbox_data(MAILBOX_TORADEX_INFO2, 1,
-        @torqueDisplay,				
+        @torqueDisplay,							; Torque, 1 decimal [Nm]
         0,
         0,
         0,
@@ -1187,7 +1210,8 @@ CheckCANMailboxes:
 		; Receiving CAN messages from battery, so connected
 		BATTERY_CAN_CONNECTED = 1
 		setup_delay(CANMessageRCVBattDLY, CAN_BATTERY_RATE)
-        
+		
+        ; Convert input values to meaningful numbers
         battVoltDisplay = map_two_points(rcvBattVolt, 0, 32767, 0, 256)            ; [V] ; Voltage range 0-512V, -32767 - 32767
         battCurDisplay = map_two_points(rcvBattCur, -32767, 32767, -1024, 1024)     ; [A] ; Current range -1000 - 1000, -32767 - 32767
         
