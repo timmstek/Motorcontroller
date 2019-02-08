@@ -2,9 +2,7 @@
 ;					Controller Slave - Slave motor controller (Right)
 ;===============================================================================================
 
-; GIT: Smesh_exp
-
-testje
+; GIT: Master
 
 ; Author:	Tim Stek
 ; Organization:	TU/ecomotive
@@ -56,22 +54,23 @@ VCL_App_Ver = 011
 ; Input Current Limits
 Battery_Current_Limit_Ramp_Rate = 1
 Battery_Current_Limiter_enable = 1
-Battery_Power_Limit = 20                ; per 10W
-;; Regen_Battery_Current_Limit
 
-RESET_PASSWORD                  constant 141        ; password for "reset_controller_remote" to reset controller
+RESET_PASSWORD                  constant 141        ; password for "resetControllerRemote" to reset controller
 
 DEBOUNCE_INPUTS					constant    5		; this sets the debounce time for switch inputs to 20ms, 4mS/unit
 
 ; CAN
 CAN_EMERGENCY_DELAY_ACK         constant    50      ; Amount of time system waits until sending next emergency message
 CAN_CYCLIC_RATE					constant    25	    ; this sets the cyclic cycle to every 100 ms, 4mS/unit
+CAN_DELAY_FOR_ACK               constant    100
+
+MULTIPLIER_CAN_NOTHING_RECEIVE  constant    2       ; Cyclic Rate times 2. If nothing is received from slave for this amount of time, create error
+CAN_NOTHING_RECEIVE_INIT        constant    1000
 
 ; Timers
-MAX_TIME_GEARCHANGE			    constant    2000    ; Maximum time gear change may take [ms] (normally 70ms + delays)
+MAX_TIME_GEARCHANGE			    constant    1500    ; Maximum time gear change may take [ms]
 STARTUP_DELAY                   constant    3000    ; Delay before system starts up [ms]
-CAN_NOTHING_RECEIVE_SHUTDOWN_TIME constant  500     ; If slave does receive nothing for this amount of time, interlock turns off [ms]
-SMESH_FININSHED_DELAY           constant    10      ;
+SMESH_FININSHED_DELAY           constant    100      ;
 
 ; DNR, Throttle and Brake
 FULL_BRAKE                      constant    32767   ; On a scale of 0-32767, how hard controller will brake
@@ -81,17 +80,6 @@ NEUTRAL                         constant    0
 DRIVE16                         constant    2
 DRIVE118                        constant    3
 REVERSE                         constant    4
-
-; Current settings
-INITIAL_OUTPUT_DRIVE_CURRENT_LIMIT constant 32767       ; at 0 Battery current, output current limit, 350A /350A*32767
-INITIAL_OUTPUT_REGEN_CURRENT_LIMIT constant 2000        ; at 0 Battery regen current, output current limit,  10A /350A*32767 = 937, minimal 1638
-MIN_DRIVE_OUTPUT_CURRENT_PER_CTRLR constant 1640
-MIN_REGEN_OUTPUT_CURRENT_PER_CTRLR constant 1640
-
-MARGIN_DRIVE_INPUT_CURRENT_LIMIT   constant 700       ; 10A /350A*32767, higher than this input current, the output current will be cutback
-MARGIN_REGEN_INPUT_CURRENT_LIMIT   constant 400        ; 35A / 350A*32767, higher than this input current, the ouput current will be cutback
-MAX_DRIVE_INPUT_CURRENT_PER_CTRLR  constant 940       ; 150A /350A*32767
-MAX_REGEN_INPUT_CURRENT_PER_CTRLR  constant 500        ; 30A /350A*32767
 
 
 
@@ -103,52 +91,53 @@ MAX_REGEN_INPUT_CURRENT_PER_CTRLR  constant 500        ; 30A /350A*32767
 
 ; Accesible from programmer handheld (max. 100 user, 10 bit)
 
-Key_Switch_Hard_Reset_Complete		alias P_User1		;Can be saved to non-volatile memory
+;PAR_Total_Maint_interval		alias P_User1		;Can be saved to non-volatile memory
 
 ;Auto user variables (max. 300 user, 16 bit)
 
-create reset_controller_remote variable
+create resetControllerRemote variable
 
 ;-------------- CAN ---------------
 
-create RCV_ACK_Fault_System variable
-create RCV_ACK_System_Action variable
+create rcvFaultSystemACK variable
+create rcvSystemActionACK variable
 
-create RM_System_Init_Complete variable
+create requestParamStatus variable
+create requestSlaveParam variable
+
+create Slave_Param_Var1 variable
+create Slave_Param_Var2 variable
+create Slave_Param_Var3 variable
+create Slave_Param_Var4 variable
 
 ;-------------- Temporaries ---------------
-create  temp_Map_Output_1   variable
-create  temp_Calculation    variable
-create  temp_VCL_Throttle   variable
-create  temp_Drive_Current_Limit variable
-create  temp_Regen_Current_Limit variable
+create  mapOutputTemp   variable
+create  calculationTemp    variable
+create  VCLThrottleTemp   variable
 
 create test variable
+
 
 
 ;Standard user variables (max. 120 user, 16 bit)
 
 ; States
-RCV_State_GearChange                    alias       user10          ; Smesh gear change state received from master
-State_GearChange                        alias       user11          ; Own state Smesh gear change
-
-; Efficiency
-RM_Efficiency                           alias       user20          ; Slave Efficiency
-Power_In                                alias       user21          ; Input power (P=U*I)
-Power_Out                               alias       user22          ; Output power (P=w*T)
-Motor_Rads                              alias       user23          ; Speed of axes [rad/s]
+rcvStateGearChange                      alias       user10          ; Smesh gear change state received from master
+stateGearChange                         alias       user11          ; Own state Smesh gear change
 
 ; Temperature and current protection
-Motor_Temperature_Display               alias       user30          ; Temperature of Motor 0-255 C
-Controller_Temperature_Display          alias       user31          ; Temperature of Controller 0-255 C
-RCV_Drive_Current_Limit                 alias       user32          ; Current limits received from master
-RCV_Regen_Current_Limit                 alias       user33          ; Current limits received from master
+motorTemperatureDisplay                 alias       user30          ; Temperature of Motor 0-255 C
+contrTemperatureDisplay                 alias       user31          ; Temperature of Controller 0-255 C
+rcvBattDrivePowerLim                    alias       user32          ; Current limits received from master
+rcvBattRegenPowerLim                    alias       user33          ; Current limits received from master
+NEUTRAL_BRAKING_INIT                    alias       user35
+CURRENT_THRESHOLD_POWER_LIMITING        alias       user36
 
 ; DNR, Throttle and Brake
-RCV_DNR_Command                         alias       user40          ; Received DNR state from master
-RCV_Throttle_Compensated                alias       user41          ; Received throttle command from master
-Interlock_RCV                           alias       user42          ; Key Switch state, received from master
-Brake_RCV                               alias       user43          ; Received brake signal from master
+rcvDNRCommand                           alias       user40          ; Received DNR state from master
+rcvThrottleCompensated                  alias       user41          ; Received throttle command from master
+rcvInterlock                            alias       user42          ; Key Switch state, received from master
+rcvBrake                                alias       user43          ; Received brake signal from master
 
 
 
@@ -156,45 +145,61 @@ Brake_RCV                               alias       user43          ; Received b
 
 ;------------- CAN MAILBOXES --------------
 MAILBOX_SM_MISO1						alias CAN1
+MAILBOX_SM_MISO1_addr                   constant 0x111
+
 MAILBOX_SM_MOSI1						alias CAN2
 MAILBOX_SM_MOSI1_received               alias CAN2_received
+MAILBOX_SM_MOSI1_addr                   constant 0x101
+
 MAILBOX_SM_MOSI2						alias CAN3
 MAILBOX_SM_MOSI2_received               alias CAN3_received
+MAILBOX_SM_MOSI2_addr                   constant 0x102
+
 MAILBOX_SM_MOSI3						alias CAN4
 MAILBOX_SM_MOSI3_received               alias CAN4_received
+MAILBOX_SM_MOSI3_addr                   constant 0x100
+
 MAILBOX_SM_MISO2						alias CAN5
+MAILBOX_SM_MISO2_addr                   constant 0x110
+
 
 MAILBOX_ERROR_MESSAGES                  alias CAN19
-MAILBOX_ERROR_MESSAGES_RCV_ACK          alias CAN20
-MAILBOX_ERROR_MESSAGES_RCV_ACK_received alias CAN20_received
+MAILBOX_ERROR_MESSAGES_addr             constant 0x001
 
-MAILBOX_SM_MISO3_Init                   alias CAN21
-MAILBOX_SM_MOSI4_Init                   alias CAN22
-MAILBOX_SM_MOSI4_Init_received          alias CAN22_received
-MAILBOX_RESET_CONTROLLER                alias CAN23
-MAILBOX_RESET_CONTROLLER_received       alias CAN23_received
+MAILBOX_ERROR_MESSAGES_RCV_ACK          alias CAN20
+MAILBOX_ERROR_MESSAGES_RCV_ACK_received alias CAN20_output
+MAILBOX_ERROR_MESSAGES_RCV_ACK_addr     constant 0x002
+
+MAILBOX_MISO_REQUEST_PARAM              alias CAN21
+MAILBOX_MISO_REQUEST_PARAM_addr         constant 0x112
+
+MAILBOX_MOSI_INIT_PARAM                alias CAN22
+MAILBOX_MOSI_INIT_PARAM_received       alias CAN22_received
+MAILBOX_MOSI_INIT_PARAM_addr           constant 0x103
+
+
 
 
 ;----------- User Defined Faults ------------
 
-Fault_System                 alias      UserFault1
-    Regen_Crit_Error                  bit        Fault_System.1             ; (1, Code 51) Critical Error occured with Regen
-    Drive_Crit_Error                  bit        Fault_System.2             ; (2, Code 52) Critical Error occured with Driving
-    Temp_Crit_Error                   bit        Fault_System.4             ; (3, Code 53) Critical Error occured related to temperature
-    Regen_Fault                       bit        Fault_System.8             ; (4, Code 54) Some fault occured with Regen
-    Drive_Fault                       bit        Fault_System.16            ; (5, Code 55) Some fault occured with Driving
-    Temp_Fault                        bit        Fault_System.32            ; (6, Code 56) Some fault occured related to temperature
-    General_Fault                     bit        Fault_System.64            ; (7, Code 57) Some fault occured generally
-    General_Crit_Error                bit        Fault_System.128           ; (8, Code 58) Critical Error occured generally
+faultSystem                 alias      UserFault1
+    regenCritError                  bit        faultSystem.1             ; (1, Code 51) Critical Error occured with Regen
+    driveCritError                  bit        faultSystem.2             ; (2, Code 52) Critical Error occured with Driving
+    temperatureCritError                   bit        faultSystem.4             ; (3, Code 53) Critical Error occured related to temperature
+    regenFault                       bit        faultSystem.8             ; (4, Code 54) Some fault occured with Regen
+    driveFault                       bit        faultSystem.16            ; (5, Code 55) Some fault occured with Driving
+    temperatureFault                        bit        faultSystem.32            ; (6, Code 56) Some fault occured related to temperature
+    generalFault                     bit        faultSystem.64            ; (7, Code 57) Some fault occured generally
+    generalCritError                bit        faultSystem.128           ; (8, Code 58) Critical Error occured generally
     
-User_Fault_Action_01 = 0000000000011011b            ; Shutdown motor, shut down main contactor, Set Throttle command to 0, Set interlock off
-User_Fault_Action_02 = 0000010000011011b            ; Shutdown motor, shut down main contactor, Set Throttle command to 0, Set interlock off, Full brake
-User_Fault_Action_03 = 0000000000011011b            ; Shutdown motor, shut down main contactor, Set Throttle command to 0, Set interlock off
-User_Fault_Action_04 = 0000000000000000b
-User_Fault_Action_05 = 0000000000000000b
-User_Fault_Action_06 = 0000000000000000b
-User_Fault_Action_07 = 0000000000000000b
-User_Fault_Action_08 = 0000000000011011b            ; Shutdown motor, shut down main contactor, Set Throttle command to 0, Set interlock off
+user_fault_action_01 = 1101100000000000b            ; Shutdown motor, shut down main contactor, Set Throttle command to 0, Set interlock off
+user_fault_action_02 = 1101100000100000b            ; Shutdown motor, shut down main contactor, Set Throttle command to 0, Set interlock off, Full brake
+user_fault_action_03 = 1101100000000000b            ; Shutdown motor, shut down main contactor, Set Throttle command to 0, Set interlock off
+user_fault_action_04 = 0000000000000000b
+user_fault_action_05 = 0000000000000000b
+user_fault_action_06 = 0000000000000000b
+user_fault_action_07 = 0000000000000000b
+user_fault_action_08 = 1101100000000000b            ; Shutdown motor, shut down main contactor, Set Throttle command to 0, Set interlock off
 
 
 ;--------------- INPUTS ----------------
@@ -210,13 +215,13 @@ User_Fault_Action_08 = 0000000000011011b            ; Shutdown motor, shut down 
 
 ;--------------- OUTPUTS ----------------
 ;Main				alias PWM1					;Pin J1-06
-Fan1IN				alias PWM2					;Pin J1-05
-Fan2OUT				alias PWM3					;Pin J1-04
+;FREE				alias PWM2					;Pin J1-05
+;FREE				alias PWM3					;Pin J1-04
 ;FREE				alias PWM4					;Pin J1-03
 ;FREE				alias PWM5					;Pin J1-02
 
-;SmeshPin			alias DigOut6				;Pin J1-19
-;SmeshPin_output	alias DigOut6_output
+;FREE			    alias DigOut6				;Pin J1-19
+;FREE_output        alias DigOut6_output
 ;Free   			alias DigOut7				;Pin J1-20
 ;Free_output        alias DigOut7_output
 
@@ -225,18 +230,17 @@ Fan2OUT				alias PWM3					;Pin J1-04
 ; none
 
 ;--------------- DELAYS -----------------
-Startup_DLY                       alias     DLY1             
-Startup_DLY_output                alias     DLY1_output
-Smesh_DLY                         alias     DLY2
-Smesh_DLY_output                  alias     DLY2_output
-EMERGENCY_ACK_DLY                 alias     DLY3
-EMERGENCY_ACK_DLY_output          alias     DLY3_output
-CAN_INIT_ACK_DLY                  alias     DLY4
-CAN_INIT_ACK_DLY_output           alias     DLY4_output
-CAN_RCV_MASTER_DLY                alias     DLY5
-CAN_RCV_MASTER_DLY_output         alias     DLY5_output
-General_DLY                       alias     DLY4
-General_DLY_output                alias     DLY4_output
+startupDLY                      alias		DLY1             
+startupDLY_output               alias		DLY1_output
+smeshFinishedDLY                alias     DLY3
+smeshFinishedDLY_output         alias     DLY3_output
+emergencyACKDLY                 alias     DLY4
+emergencyACKDLY_output          alias     DLY4_output
+CANACKDLY                       alias     DLY6
+CANACKDLY_output                alias     DLY6_output
+communicaitonMasterErrorDLY             alias     DLY7
+communicaitonMasterErrorDLY_ouput       alias     DLY7_output
+
 
 
 
@@ -253,14 +257,21 @@ General_DLY_output                alias     DLY4_output
 
 
 ; Use the delay to make sure that all hardware resourses are ready to run
-Setup_Delay(Startup_DLY, STARTUP_DELAY)
-while (Startup_DLY_output <> 0) {}			; Wait 500ms before start
+setup_delay(startupDLY, STARTUP_DELAY)
+while (startupDLY_output <> 0) {}			; Wait 500ms before start
+
+clear_interlock()
 
 ; setup inputs
 setup_switches(DEBOUNCE_INPUTS)
 
 ;Initiate sytems
 call startup_CAN_System 		;setup and start the CAN communications system
+
+setup_delay(communicaitonMasterErrorDLY, CAN_NOTHING_RECEIVE_INIT)
+
+
+rcvBattDrivePowerLim = 125
 
 
 
@@ -281,20 +292,15 @@ call startup_CAN_System 		;setup and start the CAN communications system
 
 Mainloop:
     
-    Setup_Delay(DLY11, 10)
-    
-    if (reset_controller_remote = RESET_PASSWORD) {
+    if (resetControllerRemote = RESET_PASSWORD) {
         Reset_Controller()
     }
     
-    call CheckCANMailboxes
+    call checkCANMailboxes
     
     call DNR_statemachine
     
     call faultHandling
-    
-    
-    while (DLY11_output <> 0) {}			; Wait 100ms before start
     
     
     goto Mainloop 
@@ -323,8 +329,8 @@ startup_CAN_System:
    			; Set Message Type and Master ID to 0, and put Slave ID to pre-defined 11bit identifier.
    			;
 
-    Suppress_CANopen_Init = 0			;first undo suppress, then startup CAN, then disable CANopen
-    Disable_CANOpen_PDO()				; disables OS PDO mapping and frees 
+    suppress_CANopen_init = 0			;first undo suppress, then startup CAN, then disable CANopen
+    disable_CANopen_pdo()				; disables OS PDO mapping and frees 
 
     setup_CAN(CAN_500KBAUD, 0, 0, -1, 0)		;(Baud, Sync, Reserved[0], Slave ID, Restart)
 												;Baudrate = 500KB/s setting, no Sync, Not Used, Not Used, Auto Restart
@@ -336,36 +342,36 @@ startup_CAN_System:
    			; Type:			PDO1 MISO1
    			; Partner:		Master Motorcontroller
 
-    Setup_Mailbox(MAILBOX_SM_MISO1, 0, 0, 0x111, C_CYCLIC, C_XMT, 0, 0)
+    setup_mailbox(MAILBOX_SM_MISO1, 0, 0, MAILBOX_SM_MISO1_addr, C_CYCLIC, C_XMT, 0, 0)
 
-    Setup_Mailbox_Data(MAILBOX_SM_MISO1, 6,			
-        @System_Action,				        ; DC battery current , calculated not measured
-        @System_Action + USEHB,
-        @Motor_Temperature_Display,			    ; Motor temperature 0-255°C
-        @Controller_Temperature_Display,        ; Controller temperature  0-255°C
-        @State_GearChange,                      ; Gear change state
-        @Fault_System,
+    setup_mailbox_data(MAILBOX_SM_MISO1, 6,			
+        @system_action,				        ; DC battery current , calculated not measured
+        @system_action + USEHB, 
+        @motorTemperatureDisplay,			    ; Motor temperature 0-255°C
+        @contrTemperatureDisplay,        ; Controller temperature  0-255°C
+        @stateGearChange,                      ; Gear change state
+        @faultSystem,
         0,
         0)                          ; Fault system
 		
 
 
    			; MAILBOX 2
-   			; Purpose:		Send information: Torque, Speed, Smesh enabled and fault codes
+   			; Purpose:		Receive information: Torque, Speed, Smesh enabled and fault codes
    			; Type:			PDO2 MOSI1
    			; Partner:		Slave Motorcontroller
         
-    Setup_Mailbox(MAILBOX_SM_MOSI1, 0, 0, 0x101, C_EVENT, C_RCV, 0, 0)
+    setup_mailbox(MAILBOX_SM_MOSI1, 0, 0, MAILBOX_SM_MOSI1_addr, C_EVENT, C_RCV, 0, 0)
     
-    Setup_Mailbox_Data(MAILBOX_SM_MOSI1, 8,
-        @RCV_Throttle_Compensated,			    ; Torque for right motorcontroller
-        @RCV_Throttle_Compensated + USEHB, 
-        @RCV_State_GearChange,			        ; Command to change gear
-        @RCV_Drive_Current_Limit,			    ; Set max speed
-        @RCV_Drive_Current_Limit + USEHB,
-        @RCV_Regen_Current_Limit,				; Set Regen limit
-        @RCV_Regen_Current_Limit + USEHB, 
-        @RCV_DNR_Command)
+    setup_mailbox_data(MAILBOX_SM_MOSI1, 6,
+        @rcvThrottleCompensated,			    ; Torque for right motorcontroller
+        @rcvThrottleCompensated + USEHB, 
+        @rcvStateGearChange,			        ; Command to change gear
+        @rcvBattDrivePowerLim,			    ; Set max speed
+        @rcvBattDrivePowerLim + USEHB, 
+        @rcvDNRCommand,
+        0,
+        0)
 
 
    			; MAILBOX 3
@@ -373,11 +379,11 @@ startup_CAN_System:
    			; Type:			PDO1 MOSI2
    			; Partner:		Slave Motorcontroller
 
-    Setup_Mailbox(MAILBOX_SM_MOSI2, 0, 0, 0x102, C_EVENT, C_RCV, 0, 0)
+    setup_mailbox(MAILBOX_SM_MOSI2, 0, 0, MAILBOX_SM_MOSI2_addr, C_EVENT, C_RCV, 0, 0)
 
-    Setup_Mailbox_Data(MAILBOX_SM_MOSI2, 2,
-        @Brake_RCV,
-        @Interlock_RCV,
+    setup_mailbox_data(MAILBOX_SM_MOSI2, 2,
+        @rcvBrake,
+        @rcvInterlock,
         0,
         0,
         0,
@@ -391,17 +397,17 @@ startup_CAN_System:
    			; Type:			PDO MOSI3
    			; Partner:		Slave Motorcontroller
             
-    Setup_Mailbox(MAILBOX_SM_MOSI3, 0, 0, 0x100, C_EVENT, C_RCV, 0, 0)
+    setup_mailbox(MAILBOX_SM_MOSI3, 0, 0, MAILBOX_SM_MOSI3_addr, C_EVENT, C_RCV, 0, 0)
 
-    Setup_Mailbox_Data(MAILBOX_SM_MOSI3, 5, 		
-        @RCV_Throttle_Compensated,			
-        @RCV_Throttle_Compensated + USEHB,
-        @Drive_Current_Limit,
-        @Drive_Current_Limit + USEHB,
-        @RCV_State_GearChange,							
+    setup_mailbox_data(MAILBOX_SM_MOSI3, 6, 		
+        @rcvThrottleCompensated,			
+        @rcvThrottleCompensated + USEHB,
+        @rcvStateGearChange,							
+        @resetControllerRemote,
+		@rcvBattDrivePowerLim,
+        @rcvBattDrivePowerLim + USEHB,
         0,
-		0,
-		0)
+        0)
         
             
             ; MAILBOX 5
@@ -409,10 +415,10 @@ startup_CAN_System:
    			; Type:			PDO MISO3
    			; Partner:		Slave Motorcontroller
          
-    Setup_Mailbox(MAILBOX_SM_MISO2, 0, 0, 0x110, C_EVENT, C_XMT, 0, 0)
+    setup_mailbox(MAILBOX_SM_MISO2, 0, 0, MAILBOX_SM_MISO2_addr, C_EVENT, C_XMT, 0, 0)
 
-    Setup_Mailbox_Data(MAILBOX_SM_MISO2, 1, 		
-        @State_GearChange,			; Motor torque
+    setup_mailbox_data(MAILBOX_SM_MISO2, 1, 		
+        @stateGearChange,			; Motor torque
         0, 
         0,				
         0, 
@@ -422,17 +428,16 @@ startup_CAN_System:
 		0)
         
         
-        
             ; MAILBOX 19
    			; Purpose:		send information: Error messages to Master controller
    			; Type:			PDO6
    			; Partner:		Master controller
 
-    Setup_Mailbox(MAILBOX_ERROR_MESSAGES, 0, 0, 0x001, C_EVENT, C_XMT, 0, 0)
-    Setup_Mailbox_Data(MAILBOX_ERROR_MESSAGES, 3, 		
-        @Fault_System,
-        @System_Action,				; DC battery current , calculated not measured
-        @System_Action + USEHB, 
+    setup_mailbox(MAILBOX_ERROR_MESSAGES, 0, 0, MAILBOX_ERROR_MESSAGES_addr, C_EVENT, C_XMT, 0, 0)
+    setup_mailbox_data(MAILBOX_ERROR_MESSAGES, 3, 		
+        @faultSystem,
+        @system_action,				; DC battery current , calculated not measured
+        @system_action + USEHB, 
         0,
         0,
         0,
@@ -445,111 +450,117 @@ startup_CAN_System:
    			; Type:			PDO6
    			; Partner:		Master controller
 
-    Setup_Mailbox(MAILBOX_ERROR_MESSAGES_RCV_ACK, 0, 0, 0x002, C_EVENT, C_RCV, 0, 0)
-    Setup_Mailbox_Data(MAILBOX_ERROR_MESSAGES_RCV_ACK, 3, 		
-        @RCV_ACK_Fault_System,
-        @RCV_ACK_System_Action,				; DC battery current , calculated not measured
-        @RCV_ACK_System_Action + USEHB, 
+    setup_mailbox(MAILBOX_ERROR_MESSAGES_RCV_ACK, 0, 0, MAILBOX_ERROR_MESSAGES_RCV_ACK_addr, C_EVENT, C_RCV, 0, 0)
+    setup_mailbox_data(MAILBOX_ERROR_MESSAGES_RCV_ACK, 3, 		
+        @rcvFaultSystemACK,
+        @rcvSystemActionACK,				; DC battery current , calculated not measured
+        @rcvSystemActionACK + USEHB, 
         0,
         0,
         0,
         0,
         0)
-        
         
         
             ; MAILBOX 21
-   			; Purpose:		Send information: Request for Init
-   			; Type:			MISO3
+   			; Purpose:		send information: request for init parameters
+   			; Type:			MISO
    			; Partner:		Master controller
-        
-    Setup_Mailbox(MAILBOX_SM_MISO3_Init, 0, 0, 0x112, C_EVENT, C_XMT, 0, 0)
-    Setup_Mailbox_Data(MAILBOX_SM_MISO3_Init, 1, 		
-        @RM_System_Init_Complete,
+
+    setup_mailbox(MAILBOX_MISO_REQUEST_PARAM, 0, 0, MAILBOX_MISO_REQUEST_PARAM_addr, C_EVENT, C_XMT, 0, 0)
+    setup_mailbox_data(MAILBOX_MISO_REQUEST_PARAM, 1, 		
+        @requestSlaveParam,
         0,
-        0, 
+        0,
         0,
         0,
         0,
         0,
         0)
-        
-        
         
             ; MAILBOX 22
-   			; Purpose:		Receive information: Init Slave controller
-   			; Type:			MOSI4
+   			; Purpose:		receive information: Parameters at Init
+   			; Type:			MOSI
    			; Partner:		Master controller
 
-    Setup_Mailbox(MAILBOX_SM_MOSI4_Init, 0, 0, 0x103, C_EVENT, C_RCV, 0, 0)
-    Setup_Mailbox_Data(MAILBOX_SM_MOSI4_Init, 8, 		
-        @Max_Speed_TrqM,
-        @Max_Speed_TrqM + USEHB,				
-        @Accel_Rate_TrqM, 
-        @Accel_Rate_TrqM + USEHB,
-        @Brake_Rate_TrqM,
-        @Brake_Rate_TrqM + USEHB,
-        @Neutral_Braking_TrqM,
-        @Neutral_Braking_TrqM + USEHB)
+    setup_mailbox(MAILBOX_MOSI_INIT_PARAM, 0, 0, MAILBOX_MOSI_INIT_PARAM_addr, C_EVENT, C_RCV, 0, 0)
+    setup_mailbox_data(MAILBOX_MOSI_INIT_PARAM, 8, 		
+        @Slave_Param_Var1,
+        @Slave_Param_Var1 + USEHB,				
+        @Slave_Param_Var2, 
+        @Slave_Param_Var2 + USEHB,
+        @Slave_Param_Var3,
+        @Slave_Param_Var3 + USEHB,
+        @Slave_Param_Var4,
+        @Slave_Param_Var4 + USEHB)
         
-            
-            
-            ; MAILBOX 23
-   			; Purpose:		Receive information: reset command
-   			; Type:			PDO6
-   			; Partner:		Master controller
-
-    Setup_Mailbox(MAILBOX_RESET_CONTROLLER, 0, 0, 0x003, C_EVENT, C_RCV, 0, 0)
-    Setup_Mailbox_Data(MAILBOX_RESET_CONTROLLER, 1, 		
-        @reset_controller_remote,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0)
 
 
 
 
-    CAN_Set_Cyclic_Rate(CAN_CYCLIC_RATE)			; this sets the cyclic cycle to
-    Startup_CAN()					; Start the event driven mailbox;
-    Startup_CAN_Cyclic()			; Start the cyclic mailboxes
+    CAN_set_cyclic_rate(CAN_CYCLIC_RATE)			; this sets the cyclic cycle to
+    startup_CAN()					; Start the event driven mailbox;
+    startup_CAN_cyclic()			; Start the cyclic mailboxes
 
     return
 
 
-CheckCANMailboxes:
+checkCANMailboxes:
+
+    call calculateTemperature
     
-    if (MAILBOX_SM_MOSI4_Init_received = ON) {
+    ; Receive the right parameters from master
+    
+    if ( (MAILBOX_MOSI_INIT_PARAM_received = ON) & (requestParamStatus = 0)) {
+        MAILBOX_MOSI_INIT_PARAM_received = OFF
         
-        RM_System_Init_Complete = 1
-    }
-    
-    if ( (RM_System_Init_Complete = 0) & (CAN_INIT_ACK_DLY_output = 0) ) {
-        send_mailbox(MAILBOX_SM_MISO3_Init)
+        Max_Speed_TrqM          = Slave_Param_Var1
+        Accel_Rate_TrqM         = Slave_Param_Var2
+        Accel_Release_Rate_TrqM = Slave_Param_Var3
+        Brake_Rate_TrqM         = Slave_Param_Var4
         
-        Setup_Delay(CAN_INIT_ACK_DLY, CAN_EMERGENCY_DELAY_ACK)
-    }
-    
-    if ( (MAILBOX_SM_MOSI1_received = ON) | (MAILBOX_SM_MOSI2_received = ON) | (MAILBOX_SM_MOSI3_received = ON) | (MAILBOX_ERROR_MESSAGES_RCV_ACK_received = ON) | (MAILBOX_SM_MOSI4_Init_received = ON) ) {
-        MAILBOX_SM_MOSI1_received = OFF
-        MAILBOX_SM_MOSI2_received = OFF
-        MAILBOX_SM_MOSI3_received = OFF
-        MAILBOX_ERROR_MESSAGES_RCV_ACK_received = OFF
-        MAILBOX_SM_MOSI4_Init_received = OFF
+        requestParamStatus = 1
         
-        setup_delay(CAN_RCV_MASTER_DLY, CAN_NOTHING_RECEIVE_SHUTDOWN_TIME)
+    } else if ( (MAILBOX_MOSI_INIT_PARAM_received = ON) & (requestParamStatus = 1)) {
+        MAILBOX_MOSI_INIT_PARAM_received = OFF
+        
+        Brake_Release_Rate_TrqM = Slave_Param_Var1
+        NEUTRAL_BRAKING_INIT    = Slave_Param_Var2
+        ;FREE                   = Slave_Param_Var3
+        ;FREE                   = Slave_Param_Var4
+        
+        Neutral_Braking_TrqM = NEUTRAL_BRAKING_INIT
+        
+        requestParamStatus = 2
+        
     }
     
-    if (CAN_RCV_MASTER_DLY_output = 0) {
-        ; Too much time is elapsed from last CAN Message
-        clear_Interlock()
+    ; Request parameters from master
+    
+    if ( (requestParamStatus = 0) & (CANACKDLY_output = 0) ) {
+        
+        requestSlaveParam = 1
+        
+        send_mailbox(MAILBOX_MISO_REQUEST_PARAM)
+        setup_delay(CANACKDLY, CAN_DELAY_FOR_ACK)
+        
+    } else if ( (requestParamStatus = 1) & (CANACKDLY_output = 0) ) {
+        requestSlaveParam = 2
+        
+        send_mailbox(MAILBOX_MISO_REQUEST_PARAM)
+        setup_delay(CANACKDLY, CAN_DELAY_FOR_ACK)
     }
     
     
+    ; When nothing received from Master, create error
     
+    if (MAILBOX_SM_MOSI1_Received = ON) {
+        MAILBOX_SM_MOSI1_Received = OFF
+        
+        calculationTemp = CAN_CYCLIC_RATE * 4 * MULTIPLIER_CAN_NOTHING_RECEIVE
+        setup_delay(communicaitonMasterErrorDLY, calculationTemp)
+        
+    }
 
     return
     
@@ -558,139 +569,59 @@ CheckCANMailboxes:
     
     
 faultHandling:
-
-    call calculateTemperature
-
-
-    ;0-12800
-    ; Transform Battery_current to percentage of rated current
-    ;if (Battery_Current >= 0) {
-    ;    temp_Calculation = Map_Two_Points(Battery_Current, 0, 12800, 0, 32767)
-    ;    
-    ;    ; Reduce Current at higher battery current
-    ;    temp_Drive_Current_Limit = Map_Two_Points(temp_Calculation, MARGIN_DRIVE_INPUT_CURRENT_LIMIT, MAX_DRIVE_INPUT_CURRENT_PER_CTRLR, INITIAL_OUTPUT_DRIVE_CURRENT_LIMIT, MIN_DRIVE_OUTPUT_CURRENT_PER_CTRLR)
-    ;    temp_Regen_Current_Limit = INITIAL_OUTPUT_REGEN_CURRENT_LIMIT
-    ;} else {
-    ;    temp_Calculation = Map_Two_Points(-Battery_Current, 0, 12800, 0, 32767)
-    ;    
-    ;    ; Reduce Current at higher battery current
-    ;    temp_Drive_Current_Limit = INITIAL_OUTPUT_DRIVE_CURRENT_LIMIT
-    ;    temp_Regen_Current_Limit = Map_Two_Points(temp_Calculation, MARGIN_DRIVE_INPUT_CURRENT_LIMIT, MAX_REGEN_INPUT_CURRENT_PER_CTRLR, INITIAL_OUTPUT_REGEN_CURRENT_LIMIT, MIN_REGEN_OUTPUT_CURRENT_PER_CTRLR)
-    ;}
     
-    if (RCV_Drive_Current_Limit <> 0) {
-        ; Limit is determined by master
-        temp_Drive_Current_Limit = RCV_Drive_Current_Limit
+    if (regenFault = ON) {
+        
+        ; Limits are controlled by master controller
+        
+    }
+    if (driveFault = ON) {
+
+        ; Limits are controlled by master controller
+        
+    }
+    if (temperatureFault = ON) {
+        
+        ; Limits are controlled by master controller
+        
+    }
+    if (generalFault = ON) {
+        
+        ; Limits are controlled by master controller
+        
+    }
+    
+    if ( (regenFault = OFF) & (driveFault = OFF) & (temperatureFault = OFF) & (generalFault = OFF)) {
+        
+        ; Limits are controlled by master controller
+        
+    }
+    
+    
+    ; Silence from Master over CAN, so create error
+    if ( (communicaitonMasterErrorDLY_ouput <> 0)) {
+        generalCritError = OFF
     } else {
-        temp_Drive_Current_Limit = INITIAL_OUTPUT_DRIVE_CURRENT_LIMIT
+        generalCritError = ON
     }
     
-    if (RCV_Regen_Current_Limit <> 0) {
-        ; Limit is determined by master
-        temp_Regen_Current_Limit = RCV_Regen_Current_Limit
-    } else {
-        temp_Regen_Current_Limit = INITIAL_OUTPUT_REGEN_CURRENT_LIMIT
-    }
     
-    ;if (Battery_Current >= 0) {
-    ;    temp_Calculation = Map_Two_Points(Battery_Current, 0, 12800, 0, 32767)
-    ;    
-    ;    ; Reduce Current at higher battery current
-    ;    if (RCV_Drive_Current_Limit = 0) {
-    ;        ; When limit is not determined by master, calculate own limit
-    ;        
-    ;        ; Reduce Current at higher battery current
-    ;        temp_Drive_Current_Limit = Map_Two_Points(temp_Calculation, MARGIN_DRIVE_INPUT_CURRENT_LIMIT, MAX_DRIVE_INPUT_CURRENT_PER_CTRLR, INITIAL_OUTPUT_DRIVE_CURRENT_LIMIT, MIN_DRIVE_OUTPUT_CURRENT_PER_CTRLR)
-    ;        
-    ;    } else {
-    ;        
-    ;    }
-    ;    
-    ;    if (RCV_Regen_Current_Limit = 0) {
-    ;        ; When limit is not determined by master, calculate own limit
-    ;        temp_Regen_Current_Limit = INITIAL_OUTPUT_REGEN_CURRENT_LIMIT
-    ;    } else {
-    ;        ; Limit is determined by master
-    ;        temp_Regen_Current_Limit = RCV_Regen_Current_Limit
-    ;    }
-    ;    
-    ;} else {
-    ;    temp_Calculation = Map_Two_Points(-Battery_Current, 0, 12800, 0, 32767)
-    ;    
-    ;    ; Reduce Current at higher battery current
-    ;    
-    ;    if (RCV_Drive_Current_Limit = 0) {
-    ;        ; When limit is not determined by master, calculate own limit
-    ;        temp_Calculation = Map_Two_Points(-Battery_Current, 0, 12800, 0, 32767)
-    ;        
-    ;        ; Reduce Current at higher battery current
-    ;        temp_Drive_Current_Limit = INITIAL_OUTPUT_DRIVE_CURRENT_LIMIT
-    ;        
-    ;    } else {
-    ;        ; Limit is determined by master
-    ;        temp_Drive_Current_Limit = RCV_Drive_Current_Limit
-    ;    }
-    ;    
-    ;    if (RCV_Regen_Current_Limit = 0) {
-    ;        ; When limit is not determined by master, calculate own limit
-    ;        temp_Regen_Current_Limit = Map_Two_Points(temp_Calculation, MARGIN_DRIVE_INPUT_CURRENT_LIMIT, MAX_REGEN_INPUT_CURRENT_PER_CTRLR, INITIAL_OUTPUT_REGEN_CURRENT_LIMIT, MIN_REGEN_OUTPUT_CURRENT_PER_CTRLR)
-    ;    } else {
-    ;        ; Limit is determined by master
-    ;        temp_Regen_Current_Limit = RCV_Regen_Current_Limit
-    ;    }
-    ;    
-    ;}
-    
-    
-    
-    if (Regen_Fault = ON) {
-        
-        ; Limits are controlled by master controller
-        
-    }
-    if (Drive_Fault = ON) {
-
-        ; Limits are controlled by master controller
-        
-    }
-    if (Temp_Fault = ON) {
-        
-        ; Limits are controlled by master controller
-        
-    }
-    if (General_Fault = ON) {
-        
-        ; Limits are controlled by master controller
-        
-    }
-    
-    if ( (Regen_Fault = OFF) & (Drive_Fault = OFF) & (Temp_Fault = OFF) & (General_Fault = OFF)) {
-        
-        ; Limits are controlled by master controller
-        
-    }
-    
-    if ( (System_Action <> 0) | (Fault_System <> 0) ) {
+    if ( (system_action <> 0) | (faultSystem <> 0) ) {
         ; There is some fault, so send to Master controller
         
-        if ( (EMERGENCY_ACK_DLY_output = 0) & (RCV_ACK_Fault_System <> Fault_System) & (RCV_ACK_System_Action <> System_Action) ) {
+        if ( (emergencyACKDLY_output = 0) & (rcvFaultSystemACK <> faultSystem) & (rcvSystemActionACK <> system_action) ) {
             send_mailbox(MAILBOX_ERROR_MESSAGES)
         
-            Setup_Delay(EMERGENCY_ACK_DLY, CAN_EMERGENCY_DELAY_ACK)
+            setup_delay(emergencyACKDLY, CAN_EMERGENCY_DELAY_ACK)
         }
 
     } else {
-        RCV_ACK_Fault_System = 0
-        RCV_ACK_System_Action = 0
+        rcvFaultSystemACK = 0
+        rcvSystemActionACK = 0
     }
     
-    ; Set current limits to the correct values
-    Drive_Current_Limit = temp_Drive_Current_Limit
-    Regen_Current_Limit = temp_Regen_Current_Limit
-    
-    ; Set Regen limits correct
-    Brake_Current_Limit = Regen_Current_Limit
-    Interlock_Brake_Current_Limit = Regen_Current_Limit
+    ; Control Power Limiting
+    Battery_Power_Limit = rcvBattDrivePowerLim
     
     return
 
@@ -715,76 +646,77 @@ DNR_statemachine:
 
     ; STATE MACHINE
     
-    if ((Interlock_RCV = 1)) {
+    if ((rcvInterlock = 1) & (Interlock_State = OFF)) {
         ; Turn car 'on'
-        if ((Interlock_State = OFF)) {
-            set_Interlock()
-        }
-        if (Key_Switch_Hard_Reset_Complete <> 0) {
-            Key_Switch_Hard_Reset_Complete = 0
-        }
-        
-    } else if ((Interlock_RCV = 0)) {
-        ; turn car 'off'
-        if ((Interlock_State = ON)) {
-            clear_Interlock()
-        }
-        
-        
-        if ((System_Action <> 0) & (Key_Switch_Hard_Reset_Complete = 0)) {
+        set_interlock()
+    } else if ((rcvInterlock = 0) & (Interlock_State = ON)) {
+        clear_interlock()
+        if (system_action <> 0) {
             ; There is some fault, so reset controller at turning off car
-            Key_Switch_Hard_Reset_Complete = 1
-            Reset_Controller()
+            reset_controller()
         }
     }
     
-    if (Brake_RCV = 1) {
-        VCL_Brake = FULL_BRAKE
-        RCV_Throttle_Compensated = 0
+    
+    if (rcvBrake = 1) {
+        vcl_brake = FULL_BRAKE
+        rcvThrottleCompensated = 0
     } else {
-        VCL_Brake = 0
+        vcl_brake = 0
     }
     
     
-    if ( (RCV_State_GearChange >= 0x60) & (RCV_State_GearChange <= 0x6D) ) {
-        ;; Changing gear to 1:6
-        call setSmeshTo16
+    
+    if ( (rcvStateGearChange >= 0x60) & (rcvStateGearChange < 0x6D) ) {
+        ; Changing gear to 1:6
         
-        exit
-        
-    } else if ( (RCV_State_GearChange >= 0x80) & (RCV_State_GearChange <= 0x8D) ) {
-        ;; Changing gear to 1:18
-        call setSmeshTo118
-        
-        exit
-
-    } else if ( (State_GearChange = 0xFF) | (RCV_State_GearChange = 0xFF) ) {
-        State_GearChange = 0xFF
-        temp_VCL_Throttle = 0
-        send_mailbox(MAILBOX_SM_MISO2)
-
-    } else if ( (RCV_DNR_Command = DRIVE118) | (RCV_DNR_Command = DRIVE16) ) {
-        
-        State_GearChange = 0x01
-        
-        temp_VCL_Throttle = RCV_Throttle_Compensated         ; Set throttle to position of pedal
+        call setSmeshTo16Simple
         
         
-    } else if (RCV_DNR_Command = REVERSE) {
+    } else if ( (rcvStateGearChange >= 0x80) & (rcvStateGearChange < 0x8D) ) {
+        ; Changing gear to 1:18
         
-        State_GearChange = 0x01
+        call setSmeshTo118Simple
         
-        temp_VCL_Throttle = RCV_Throttle_Compensated    ; Set throttle to position of pedal
+    } else if ( (rcvDNRCommand = DRIVE118) | (rcvDNRCommand = DRIVE16) ) {
+        
+        if (rcvStateGearChange < 0x60) {
+            stateGearChange = 0x01
+        }
+        
+        if (Neutral_Braking_TrqM <> NEUTRAL_BRAKING_INIT) {
+            Neutral_Braking_TrqM = NEUTRAL_BRAKING_INIT
+        }
+        
+        VCLThrottleTemp = rcvThrottleCompensated         ; Set throttle to position of pedal
+        
+        
+    } else if (rcvDNRCommand = REVERSE) {
+        
+        if (rcvStateGearChange < 0x60) {
+            stateGearChange = 0x01
+        }
+        
+        if (Neutral_Braking_TrqM <> NEUTRAL_BRAKING_INIT) {
+            Neutral_Braking_TrqM = NEUTRAL_BRAKING_INIT
+        }
+        
+        VCLThrottleTemp = rcvThrottleCompensated    ; Set throttle to position of pedal
         
         
     } else {
         ; When in neutral or undefined state, set throttle to zero
-        temp_VCL_Throttle = 0
         
-        State_GearChange = 0x01
+        if (Neutral_Braking_TrqM <> 0) {
+            Neutral_Braking_TrqM = 0
+        }
+        
+        VCLThrottleTemp = 0
+        
+        stateGearChange = 0x01
     }
     
-    VCL_Throttle = temp_VCL_Throttle
+    vcl_throttle = VCLThrottleTemp
 
     
     return
@@ -795,173 +727,97 @@ DNR_statemachine:
     
 calculateTemperature:
     
-    Motor_Temperature_Display = Map_Two_Points(Motor_Temperature, 0, 2550, 0, 255)
-    Controller_Temperature_Display = Map_Two_Points(Controller_Temperature, 0, 2550, 0, 255)
+    motorTemperatureDisplay = map_two_points(motor_temperature, -500, 2050, 0, 255)
+    contrTemperatureDisplay = map_two_points(controller_temperature, -500, 2050, 0, 255)
     
     return
     
     
     
     
+setSmeshTo16Simple:
     
-setSmeshTo16:
     
-    ;;;;; 1. Reduce Left throttle
+    ;;;;; 2. Send ACK: neutral braking is disabled
     
-    if ( (RCV_State_GearChange = 0x61) & (State_GearChange <> 0x62) ) {
-        setup_delay(Smesh_DLY, MAX_TIME_GEARCHANGE)
-        State_GearChange = 0x62
+    if ( (rcvStateGearChange = 0x61) & (stateGearChange <> 0x62) ) {
+        
+        Neutral_Braking_TrqM = 0
+        
+        stateGearChange = 0x62
         
         send_mailbox(MAILBOX_SM_MISO2)
+        
     }
     
     
-    ;;;;; 2. Receive ACK: Procedure has started
-    ;;;;; 3. multiply throttle of Right controller with 2
+    ;;;;; 12. Send ACK: procedure is finished
     
-    if ( (RCV_State_GearChange = 0x63) & (State_GearChange <> 0x64) ) {
-        VCL_Throttle = RCV_Throttle_Compensated
-        State_GearChange = 0x64
+    if ( (rcvStateGearChange = 0x65) & (stateGearChange <> 0x6D) ) {
+        
+        stateGearChange = 0x66
         
         send_mailbox(MAILBOX_SM_MISO2)
-    }
-
-    
-    ;;;;; 4. receive ACK from controller: throttle is increased
-    ;;;;; 5. Switch left gear to 1:18
-	
-    
-    ;;;;; 6. Reduce throttle right controller
-    
-    if ( (RCV_State_GearChange = 0x66) & (State_GearChange <> 0x67) ) {
-        VCL_Throttle = RCV_Throttle_Compensated
-        State_GearChange = 0x67
         
-        send_mailbox(MAILBOX_SM_MISO2)
-    }
-    
-    
-    ;;;;; 7. receive ACK from controller: throttle is reduced
-    ;;;;; 8. Increase left throttle
-    ;;;;; 10. receive ACK from controller: procedure has started
-    ;;;;; 11. reduce left throttle to normal
-
-    
-    ;;;;; 12. increase throttle right controller to normal
-    
-    if ( (RCV_State_GearChange = 0x6C) & (State_GearChange <> 0x6D) ) {
-        VCL_Throttle = RCV_Throttle_Compensated
-        
-        
-    ;;;;; 13. Change is successful, thus speed_to_RPM can be changed
-        
-        Speed_to_RPM = 601          ; (G/d)*5305 ... 18/530*5305 ... One decimal
+        speed_to_rpm = 589          ; (G/d)*5305 ... 6/530*5305 ... One decimal
+        Neutral_Braking_TrqM = NEUTRAL_BRAKING_INIT
         
         ; Gear state to complete
-        State_GearChange = 0x6D
         
-        send_mailbox(MAILBOX_SM_MISO2)
+        stateGearChange = 0x6D
         
-        Setup_Delay(General_DLY, SMESH_FININSHED_DELAY)
-        while (General_DLY_output <> 0) {}
+        
     }
     
+    VCLThrottleTemp = rcvThrottleCompensated    ; Set throttle to position of pedal
     
-    ;;;;; Change is not successful
-    
-    if ( (Smesh_DLY_output = 0) | (RCV_State_GearChange = 0xFF) ) {
-        ; Send signal that mission is failed
-        RCV_State_GearChange = 0;
-        State_GearChange = 0xFF
-        
-        send_mailbox(MAILBOX_SM_MISO2)
-        
-        Setup_Delay(General_DLY, SMESH_FININSHED_DELAY)
-        while (General_DLY_output <> 0) {}
-    }
-    
-    
-	return
+    return
+
+
+
+
+
+setSmeshTo118Simple:
 
     
-setSmeshTo118:
-
-    ;;;;; 1. Reduce Left throttle
+    ;;;;; 2. Send ACK: neutral braking is disabled
     
-    if ( (RCV_State_GearChange = 0x81) & (State_GearChange <> 0x82) ) {
-        setup_delay(Smesh_DLY, MAX_TIME_GEARCHANGE)
-        State_GearChange = 0x82
+    if ( (rcvStateGearChange = 0x81) & (stateGearChange <> 0x82) ) {
+        
+        Neutral_Braking_TrqM = 0
+        
+        stateGearChange = 0x82
         
         send_mailbox(MAILBOX_SM_MISO2)
+        
     }
     
     
-    ;;;;; 2. Receive ACK: Procedure has started
-    ;;;;; 3. multiply throttle of Right controller with 2
+    ;;;;; 12. Send ACK: procedure is finished
     
-    if ( (RCV_State_GearChange = 0x83) & (State_GearChange <> 0x84) ) {
-        VCL_Throttle = RCV_Throttle_Compensated
-        State_GearChange = 0x84
+    if ( (rcvStateGearChange = 0x85) & (stateGearChange <> 0x8D) ) {
+        
+        stateGearChange = 0x86
         
         send_mailbox(MAILBOX_SM_MISO2)
-    }
-
-    
-    ;;;;; 4. receive ACK from controller: throttle is increased
-    ;;;;; 5. Switch left gear to 1:18
-	
-    
-    ;;;;; 6. Reduce throttle right controller
-    
-    if ( (RCV_State_GearChange = 0x86) & (State_GearChange <> 0x87) ) {
-        VCL_Throttle = RCV_Throttle_Compensated
-        State_GearChange = 0x87
         
-        send_mailbox(MAILBOX_SM_MISO2)
-    }
-    
-    
-    ;;;;; 7. receive ACK from controller: throttle is reduced
-    ;;;;; 8. Increase left throttle
-    ;;;;; 10. receive ACK from controller: procedure has started
-    ;;;;; 11. reduce left throttle to normal
-
-    
-    ;;;;; 12. increase throttle right controller to normal
-    
-    if ( (RCV_State_GearChange = 0x8C) & (State_GearChange <> 0x8D) ) {
-        VCL_Throttle = RCV_Throttle_Compensated
-        
-        
-    ;;;;; 13. Change is successful, thus speed_to_RPM can be changed
-        
-        Speed_to_RPM = 1802          ; (G/d)*5305 ... 18/530*5305 ... One decimal
+        speed_to_rpm = 1768          ; (G/d)*5305 ... 18/530*5305 ... One decimal
+        Neutral_Braking_TrqM = NEUTRAL_BRAKING_INIT
         
         ; Gear state to complete
-        State_GearChange = 0x8D
         
-        send_mailbox(MAILBOX_SM_MISO2)
+        stateGearChange = 0x8D
         
-        Setup_Delay(General_DLY, SMESH_FININSHED_DELAY)
-        while (General_DLY_output <> 0) {}
+        
     }
     
+    VCLThrottleTemp = rcvThrottleCompensated    ; Set throttle to position of pedal
     
-    ;;;;; Change is not successful
     
-    if ( (Smesh_DLY_output = 0) | (RCV_State_GearChange = 0xFF) ) {
-        ; Send signal that mission is failed
-        RCV_State_GearChange = 0;
-        State_GearChange = 0xFF
-        
-        send_mailbox(MAILBOX_SM_MISO2)
-        
-        Setup_Delay(General_DLY, SMESH_FININSHED_DELAY)
-        while (General_DLY_output <> 0) {}
-    }
-	
-	
-	return    
+    return
+    
+    
+    
 
 
 
