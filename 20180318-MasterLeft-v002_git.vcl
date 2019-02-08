@@ -53,17 +53,17 @@ VCL_App_Ver = 012
 
 
 ; TO DO:
-; Small correction speed (a bit lower)
 ; Limit current at 15kW
 ; Reduce Ki of speed control
 ; Enable Smesh control: Neutral, groot licht, knipperlicht links/rechts
 ; Tune cornering
-; Tune Speed display during gear change
 ; Tune throttle at low speeds
 ; 
 ; Add more comments in code
 
 ; TEST:
+; Manual smesh control
+; Small correction speed (a bit lower)
 ; vehicle_speed: sends to infotainment as if it is abs value, but in DNR state machine as if it goes negative, when driving backwards
 ; current cutbacks
 ; ACK from master when slave sends error
@@ -74,7 +74,6 @@ VCL_App_Ver = 012
 
 ; Experiments:
 ; - Position Hold
-; - 
 
 
 ; REMINDER:
@@ -115,9 +114,9 @@ NEUTRAL_BRAKING_INIT            constant    15000        ; In normal conditions,
 
 ;;;;; CAN Settings
 CAN_CYCLIC_RATE					constant    25		; this sets the cyclic cycle to every 100 ms, 4mS/unit
-CAN_LOWPRIORITY_RATE            constant    800     ; sets the cyclic rate of low priority mailboxes
+CAN_LOWPRIORITY_RATE            constant    500     ; sets the cyclic rate of low priority mailboxes, [ms]
 
-; Action - Reaction
+; CAN Action - Reaction
 CAN_DELAY_FOR_ACK               constant    500     ; Amount of time to wait for an ACK from other device, in [ms]
 CAN_EMERGENCY_DELAY_ACK         constant    100		; Amount of time to wait for an ACK from other device for emergency messages, in [ms]
 
@@ -179,6 +178,7 @@ THROTTLE_OUTPUT_M				constant	2100	; The ouput when the input has value THROTTLE
 ; Display speed correctly while changing gear
 CHECK_GR_CHANGE_TIMEOUT			constant	200		; Resets RPM threshold during gear change every ... ms
 FACTOR_DIFFERENCE_RPM_CHANGE_GEAR	constant	120	; When there is a difference of factor 2.48 [/s] in RPM during the gear change. 2.48 [/s] = 1.20 [/200ms]. Then that is considered to be the moment of change, with 2 decimals
+SPEED_CORRECTION_PERC			constant	8		; Speed displayed in dashboard is ..% lower than real speed
 
 ; Start-stop system
 IDLE_RPM_THRESHOLD              constant    20		; If RPM is lower than this value, interlock is turned on after some time
@@ -428,8 +428,9 @@ DNRCommand                          alias      user51           			; DNR command
 rcvDNRCommand                       alias      user52           			; DNR command Received from switch
 rcvThrottle                         alias      user53           			; Throttle pedal state
 rcvBrake                            alias      user54           			; Brake pedal pushed
-faultCNTGearChange                  alias      user55                     ; Counts number of times gear change has fault    
+faultCNTGearChange                  alias      user55                     	; Counts number of times gear change has fault    
 lastRPMThreshold					alias	   user56						; Holds the last threshold of change in RPM during a gear change. Used for displaying correct speed in infotainment.
+manualSmeshControl					alias	   user57						; 0 if smesh is controlled automatically, 1 when controlled manually
 
 
 ; Temperature
@@ -701,6 +702,9 @@ NEUTRAL_BRAKING_INIT_VARIABLE = NEUTRAL_BRAKING_INIT
 
 BATTERY_CAN_CONNECTED = 0
 
+; Calculate displayed speed correction at 255 km/h
+maxVehicleSpeedCorrected = get_muldiv(MTD1, 255, (100-SPEED_CORRECTION_PERC), 100)
+
 ; Set default values for battery params, so no safety measure is enabled by default
 call setBatteryDefaultParam
 
@@ -710,7 +714,7 @@ rcvSteerangle = 125
 rcvThrottle = 0
 ;rcvDNRCommand = 1
 startStopActive = 0
-
+manualSmeshControl = 0
 
 
 
@@ -1201,7 +1205,7 @@ CheckCANMailboxes:
     
     ; Set correct variables to send
     interlockXMT = Interlock_State
-    vehicleSpeedDisplay = map_two_points(vehicle_speed, 0, 2550, 0, 255)
+    vehicleSpeedDisplay = map_two_points(vehicle_speed, 0, 2550, 0, maxVehicleSpeedCorrected)
     
     
     if (MAILBOX_BATT_RCV_Info1_received = ON) {
@@ -2068,7 +2072,7 @@ DNRStateMachine:
         ; - constant speed
         ; - rpm is higher than 5500 rpm
         
-        if ( ((Motor_RPM > RPM_THRES_118to16)) & (gearChangeProtectDLY_output = 0) ) {
+        if ( ((Motor_RPM > RPM_THRES_118to16)) & (gearChangeProtectDLY_output = 0) & (manualSmeshControl = 0) ) {
             ; 1:6 is more efficient, so switch to 1:6 (rcvThrottle < THROT_THRES_118to16)
             
             stateGearChange = 0x60
@@ -2113,7 +2117,7 @@ DNRStateMachine:
         }
         
         
-        if ( ( ((Motor_RPM < RPM_THRES_16to118) )) & (gearChangeProtectDLY_output = 0) ) {
+        if ( ( ((Motor_RPM < RPM_THRES_16to118) )) & (gearChangeProtectDLY_output = 0) & (manualSmeshControl = 0) ) {
             ; 1:18 is more efficient, so switch to 1:18 & (rcvBrake = 1)) | ((Motor_RPM < RPM_THRES_16to118_w_Accel) & (rcvThrottle < THROT_THRES_16to118)) | (Motor_RPM < IDLE_RPM_THRESHOLD)
             
             stateGearChange = 0x80
@@ -2231,24 +2235,20 @@ DNRStateMachine:
         stateGearChange = 0x01
     }
     
-    
     ; Calculate Steeringangle factor
     ; reduce throttle on inner wheel, independent of speed
     
     if (rcvSteerangle > (125+STEER_ANGLE_NO_EFFECT)) {
         ; Steering to right
         riSteeringMultiplier = get_map_output(angle2MultiplierMap, rcvSteerangle)
-        leSteeringMultiplier = 255
         
         riMcThrottleTemp = get_muldiv(MTD1, riMcThrottleTemp, riSteeringMultiplier, 255)
         
     } else if (rcvSteerangle < (125-STEER_ANGLE_NO_EFFECT)) {
         ; Steering to left
         leSteeringMultiplier = get_map_output(angle2MultiplierMap, rcvSteerangle)
-        riSteeringMultiplier = 255
         
         leMcThrottleTemp = get_muldiv(MTD1, leMcThrottleTemp, leSteeringMultiplier, 255)
-        
     }
     
     
