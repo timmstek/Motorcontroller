@@ -106,8 +106,8 @@ LOW_PRIO_LOOP_RATE              constant    100     ; Some code in the main loop
 
 
 ;;;;; Default power settings
-BATT_DRIVE_PWR_LIM_INIT         constant    125          ; per 10W, per 200mA, 125 per battery
-BATT_REGEN_PWR_LIM_INIT         constant    30          ; per 10W, per 200mA, 30 per battery
+BATT_DRIVE_PWR_LIM_INIT         constant    500          ; per 10W, per 200mA, 125 per battery
+BATT_REGEN_PWR_LIM_INIT         constant    150          ; per 10W, per 200mA, 30 per battery
 
 NEUTRAL_BRAKING_INIT            constant    15000        ; In normal conditions, this is how hard the motors will 'brake' when throttle is released. 50% of 32767
 
@@ -146,7 +146,7 @@ REVERSE_THROTTLE_MULTIPLIER     constant    115     ; 90% of 128 = 115
 TIME_TO_FULL_LOS_FAULT          constant    10000   ; Time it takes to go to full effect of the reduced current limits
                                                     ; Due to a fault
                               
-BATT_CUR_LIM_FAULT_MARGIN_PERC       constant    80     ; Percentage of the current limit received from batteries. From this threshold drive limits are active
+BATT_CUR_LIM_FAULT_MARGIN_PERC       constant    90     ; Percentage of the current limit received from batteries. From this threshold drive limits are active
 BATT_VOLT_LIM_FAULT_MARGIN_PERC      constant    95     ; Percentage of the voltage limit received from batteries. From this threshold drive limits are active
 BATT_TEMP_FAULT_MARGIN_PERC          constant    90     ; Percentage of the temperature limit received from batteries. From this threshold drive limits are active
 
@@ -170,9 +170,9 @@ RPM_THRES_16to118				constant    400     ; RPM where smesh is going to 1:18, whe
 THROT_THRES_16to118             constant    100     ; 20-150 if throttle signal is higher than this threshold, smesh changes to 1:6 when speed is lower than threshold
 
 ; Throttle input signal -> output signal config
-THROTTLE_INPUT_L				constant	20		; Threshold of the input signal from throttle. Minimum input signal
-THROTTLE_INPUT_M				constant	40		; First part of the throttle input signal will have another ramp on the input -> output map
-THROTTLE_INPUT_H				constant	150		; Threshold of the input signal from throttle. Maximum input signal, max throttle
+THROTTLE_INPUT_L				constant	2000		; Threshold of the input signal from throttle. Minimum input signal
+THROTTLE_INPUT_M				constant	3000		; First part of the throttle input signal will have another ramp on the input -> output map
+THROTTLE_INPUT_H				constant	3700		; Threshold of the input signal from throttle. Maximum input signal, max throttle
 THROTTLE_OUTPUT_M				constant	2100	; The ouput when the input has value THROTTLE_INPUT_M
 
 ; Display speed correctly while changing gear
@@ -189,6 +189,8 @@ TIME_TO_START_STOP              constant    10000   ; If car is idle for 10s, tu
 INIT_STEER_COMPENSATION         constant    240     ; 255 no effect, 0 full effect. At max steer angle, throttle multiplier has this value
 STEER_ANGLE_NO_EFFECT           constant    2       ; first 2 degrees has no effect on the compensation
 HIGH_PEDAL_DISABLE_THRESHOLD    constant    20      ; 0-255, When going into drive mode, throttle has to be reduced below this value
+MIN_STEER_VALUE					constant	5
+MAX_STEER_VALUE					constant	250
 
 
 ;;;;; STATES
@@ -431,6 +433,7 @@ rcvBrake                            alias      user54           			; Brake pedal
 faultCNTGearChange                  alias      user55                     	; Counts number of times gear change has fault    
 lastRPMThreshold					alias	   user56						; Holds the last threshold of change in RPM during a gear change. Used for displaying correct speed in infotainment.
 manualSmeshControl					alias	   user57						; 0 if smesh is controlled automatically, 1 when controlled manually
+maxVehicleSpeedCorrected			alias	   user58
 
 
 ; Temperature
@@ -1736,9 +1739,9 @@ setup2DMap:
         
     ; Steering angle compensation
     setup_map(angle2MultiplierMap, 3,      ; Number of points
-        0, MAX_STEER_COMPENSATION,      ; Steering to the left
+      MIN_STEER_VALUE, MAX_STEER_COMPENSATION,      ; Steering to the left
       125, 255,                         ; 
-      250, MAX_STEER_COMPENSATION,      ; Steering to the right
+      MAX_STEER_VALUE, MAX_STEER_COMPENSATION,      ; Steering to the right
         0, 0,
         0, 0,
         0, 0,
@@ -2265,6 +2268,7 @@ DNRStateMachine:
     
     vcl_throttle = leMcThrottleTemp
     riMcThrottleComp = riMcThrottleTemp
+	;riMcThrottleComp = leMcThrottleTemp
     
     
     ; Set right DNR equal to left DNR
@@ -2566,9 +2570,6 @@ setSmeshTo118:
 setupManualThrottle:
 	Throttle_Type=3
 	Throttle_Filter=16000
-	Forward=ON
-	Reverse=OFF
-	TMap=0
 	VCL_Throttle_Enable=ON
 	
 	
