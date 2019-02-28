@@ -132,7 +132,7 @@ MOTOR_COOLDOWN_THOLD            constant    90      ; 40 +50, from this temperat
 MOTOR_TEMP_FAN_MAX              constant    125     ; 75 +50, At this temperature of motor, fans are spinning at maximum, offset -50 C
 CONTROLLER_COOLDOWN_THOLD       constant    90      ; 40 +50, offset -50 C: 
 CONTR_TEMP_FAN_MAX              constant    115     ; 65 +50, offset -50 C
-FANSPEED_IDLE_IN                constant    25      ; In idle mode, fans blowing inwards will always run at 25%
+FANSPEED_IDLE_IN                constant    10      ; In idle mode, fans blowing inwards will always run at 25%
 FANSPEED_IDLE_OUT               constant    0		; In idle mode, fans blowin outwards will always run at 0%
 
 
@@ -170,10 +170,13 @@ RPM_THRES_16to118				constant    400     ; RPM where smesh is going to 1:18, whe
 THROT_THRES_16to118             constant    100     ; 20-150 if throttle signal is higher than this threshold, smesh changes to 1:6 when speed is lower than threshold
 
 ; Throttle input signal -> output signal config
-THROTTLE_INPUT_L				constant	2000		; Threshold of the input signal from throttle. Minimum input signal
-THROTTLE_INPUT_M				constant	3000		; First part of the throttle input signal will have another ramp on the input -> output map
-THROTTLE_INPUT_H				constant	3700		; Threshold of the input signal from throttle. Maximum input signal, max throttle
-THROTTLE_OUTPUT_M				constant	2100	; The ouput when the input has value THROTTLE_INPUT_M
+; MANUAL: THROTTLE_INPUT_L				constant	2000		; Threshold of the input signal from throttle. Minimum input signal
+; MANUAL: THROTTLE_INPUT_M				constant	3000		; First part of the throttle input signal will have another ramp on the input -> output map
+; MANUAL: THROTTLE_INPUT_H				constant	3700		; Threshold of the input signal from throttle. Maximum input signal, max throttle
+THROTTLE_INPUT_L				constant	25		; Threshold of the input signal from throttle. Minimum input signal
+THROTTLE_INPUT_M				constant	65		; First part of the throttle input signal will have another ramp on the input -> output map
+THROTTLE_INPUT_H				constant	145		; Threshold of the input signal from throttle. Maximum input signal, max throttle
+THROTTLE_OUTPUT_M				constant	16000	; The ouput when the input has value THROTTLE_INPUT_M. Value between 0-32767
 
 ; Display speed correctly while changing gear
 CHECK_GR_CHANGE_TIMEOUT			constant	200		; Resets RPM threshold during gear change every ... ms
@@ -186,11 +189,13 @@ IDLE_THROTTLE_THRESHOLD         constant    15      ; If throttle signal is belo
 TIME_TO_START_STOP              constant    10000   ; If car is idle for 10s, turn off interlock
 
 ; Steering compensation, e-Dif
-INIT_STEER_COMPENSATION         constant    240     ; 255 no effect, 0 full effect. At max steer angle, throttle multiplier has this value
+INIT_STEER_COMPENSATION         constant    0     ; 255 no effect, 0 full effect. At max steer angle, throttle multiplier has this value
 STEER_ANGLE_NO_EFFECT           constant    2       ; first 2 degrees has no effect on the compensation
 HIGH_PEDAL_DISABLE_THRESHOLD    constant    20      ; 0-255, When going into drive mode, throttle has to be reduced below this value
-MIN_STEER_VALUE					constant	5
-MAX_STEER_VALUE					constant	250
+MIN_STEER_VALUE					constant	20
+MAX_STEER_VALUE					constant	245
+STR_HIGH_SP						constant	500		; 1 deci, km/h.
+STEER_COMPENSATION_HIGH_SP		constant	200		; 255 no effect, 0 full effect.
 
 
 ;;;;; STATES
@@ -2247,16 +2252,23 @@ DNRStateMachine:
     
     if (rcvSteerangle > (125+STEER_ANGLE_NO_EFFECT)) {
         ; Steering to right
-        riSteeringMultiplier = get_map_output(angle2MultiplierMap, rcvSteerangle)
+		MAX_STEER_COMPENSATION = map_two_points(vehicle_speed, 0, STR_HIGH_SP, 0, STEER_COMPENSATION_HIGH_SP)
+		riSteeringMultiplier = map_two_points(rcvSteerangle, 125, MAX_STEER_VALUE, 255, MAX_STEER_COMPENSATION)
+		leSteeringMultiplier=255
         
         riMcThrottleTemp = get_muldiv(MTD1, riMcThrottleTemp, riSteeringMultiplier, 255)
         
     } else if (rcvSteerangle < (125-STEER_ANGLE_NO_EFFECT)) {
         ; Steering to left
-        leSteeringMultiplier = get_map_output(angle2MultiplierMap, rcvSteerangle)
+		MAX_STEER_COMPENSATION = map_two_points(vehicle_speed, 0, STR_HIGH_SP, 0, STEER_COMPENSATION_HIGH_SP)
+		leSteeringMultiplier = map_two_points(rcvSteerangle, MIN_STEER_VALUE, 125, MAX_STEER_COMPENSATION, 255)
+		riSteeringMultiplier=255
         
         leMcThrottleTemp = get_muldiv(MTD1, leMcThrottleTemp, leSteeringMultiplier, 255)
-    }
+    } else {
+		riSteeringMultiplier=255
+		leSteeringMultiplier=255
+	}
     
     
     if (rcvBrake = 1) {
