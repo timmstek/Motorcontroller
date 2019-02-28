@@ -710,7 +710,7 @@ maxVehicleSpeedCorrected = get_muldiv(MTD1, 255, (100-SPEED_CORRECTION_PERC), 10
 
 ; Set default values for battery params, so no safety measure is enabled by default
 call setBatteryDefaultParam
-call setupManualThrottle
+; call setupManualThrottle
 
 ; For testing purposes, model inputs
 rcvSteerangle = 125
@@ -940,7 +940,7 @@ startupCANSystem:
 
     setup_mailbox(MAILBOX_DRVSEN_RCV, 0, 0, MAILBOX_DRVSEN_RCV_addr, C_EVENT, C_RCV, 0, 0)
     setup_mailbox_data(MAILBOX_DRVSEN_RCV, 1, 		; Efficiency
-        0,					; Throttle pedal
+        rcvThrottle,					; Throttle pedal (rcvThrottle)
         0,
 		0,
 		0,
@@ -1207,7 +1207,8 @@ startupCANSystem:
 
 CheckCANMailboxes:
 
-	rcvThrottle=OS_Throttle;
+	; Manual throttle
+	; rcvThrottle=OS_Throttle;
     
     ; Set correct variables to send
     interlockXMT = Interlock_State
