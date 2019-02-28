@@ -106,8 +106,8 @@ LOW_PRIO_LOOP_RATE              constant    100     ; Some code in the main loop
 
 
 ;;;;; Default power settings
-BATT_DRIVE_PWR_LIM_INIT         constant    125          ; per 10W, per 200mA, 125 per battery
-BATT_REGEN_PWR_LIM_INIT         constant    30          ; per 10W, per 200mA, 30 per battery
+BATT_DRIVE_PWR_LIM_INIT         constant    500          ; per 10W, per 200mA, 125 per battery
+BATT_REGEN_PWR_LIM_INIT         constant    150          ; per 10W, per 200mA, 30 per battery
 
 NEUTRAL_BRAKING_INIT            constant    15000        ; In normal conditions, this is how hard the motors will 'brake' when throttle is released. 50% of 32767
 
@@ -132,7 +132,7 @@ MOTOR_COOLDOWN_THOLD            constant    90      ; 40 +50, from this temperat
 MOTOR_TEMP_FAN_MAX              constant    125     ; 75 +50, At this temperature of motor, fans are spinning at maximum, offset -50 C
 CONTROLLER_COOLDOWN_THOLD       constant    90      ; 40 +50, offset -50 C: 
 CONTR_TEMP_FAN_MAX              constant    115     ; 65 +50, offset -50 C
-FANSPEED_IDLE_IN                constant    25      ; In idle mode, fans blowing inwards will always run at 25%
+FANSPEED_IDLE_IN                constant    10      ; In idle mode, fans blowing inwards will always run at 25%
 FANSPEED_IDLE_OUT               constant    0		; In idle mode, fans blowin outwards will always run at 0%
 
 
@@ -146,7 +146,7 @@ REVERSE_THROTTLE_MULTIPLIER     constant    115     ; 90% of 128 = 115
 TIME_TO_FULL_LOS_FAULT          constant    10000   ; Time it takes to go to full effect of the reduced current limits
                                                     ; Due to a fault
                               
-BATT_CUR_LIM_FAULT_MARGIN_PERC       constant    80     ; Percentage of the current limit received from batteries. From this threshold drive limits are active
+BATT_CUR_LIM_FAULT_MARGIN_PERC       constant    90     ; Percentage of the current limit received from batteries. From this threshold drive limits are active
 BATT_VOLT_LIM_FAULT_MARGIN_PERC      constant    95     ; Percentage of the voltage limit received from batteries. From this threshold drive limits are active
 BATT_TEMP_FAULT_MARGIN_PERC          constant    90     ; Percentage of the temperature limit received from batteries. From this threshold drive limits are active
 
@@ -170,10 +170,13 @@ RPM_THRES_16to118				constant    400     ; RPM where smesh is going to 1:18, whe
 THROT_THRES_16to118             constant    100     ; 20-150 if throttle signal is higher than this threshold, smesh changes to 1:6 when speed is lower than threshold
 
 ; Throttle input signal -> output signal config
-THROTTLE_INPUT_L				constant	20		; Threshold of the input signal from throttle. Minimum input signal
-THROTTLE_INPUT_M				constant	40		; First part of the throttle input signal will have another ramp on the input -> output map
-THROTTLE_INPUT_H				constant	150		; Threshold of the input signal from throttle. Maximum input signal, max throttle
-THROTTLE_OUTPUT_M				constant	2100	; The ouput when the input has value THROTTLE_INPUT_M
+; MANUAL: THROTTLE_INPUT_L				constant	2000		; Threshold of the input signal from throttle. Minimum input signal
+; MANUAL: THROTTLE_INPUT_M				constant	3000		; First part of the throttle input signal will have another ramp on the input -> output map
+; MANUAL: THROTTLE_INPUT_H				constant	3700		; Threshold of the input signal from throttle. Maximum input signal, max throttle
+THROTTLE_INPUT_L				constant	25		; Threshold of the input signal from throttle. Minimum input signal
+THROTTLE_INPUT_M				constant	65		; First part of the throttle input signal will have another ramp on the input -> output map
+THROTTLE_INPUT_H				constant	145		; Threshold of the input signal from throttle. Maximum input signal, max throttle
+THROTTLE_OUTPUT_M				constant	16000	; The ouput when the input has value THROTTLE_INPUT_M. Value between 0-32767
 
 ; Display speed correctly while changing gear
 CHECK_GR_CHANGE_TIMEOUT			constant	200		; Resets RPM threshold during gear change every ... ms
@@ -186,9 +189,13 @@ IDLE_THROTTLE_THRESHOLD         constant    15      ; If throttle signal is belo
 TIME_TO_START_STOP              constant    10000   ; If car is idle for 10s, turn off interlock
 
 ; Steering compensation, e-Dif
-INIT_STEER_COMPENSATION         constant    240     ; 255 no effect, 0 full effect. At max steer angle, throttle multiplier has this value
+INIT_STEER_COMPENSATION         constant    0     ; 255 no effect, 0 full effect. At max steer angle, throttle multiplier has this value
 STEER_ANGLE_NO_EFFECT           constant    2       ; first 2 degrees has no effect on the compensation
 HIGH_PEDAL_DISABLE_THRESHOLD    constant    20      ; 0-255, When going into drive mode, throttle has to be reduced below this value
+MIN_STEER_VALUE					constant	20
+MAX_STEER_VALUE					constant	245
+STR_HIGH_SP						constant	500		; 1 deci, km/h.
+STEER_COMPENSATION_HIGH_SP		constant	200		; 255 no effect, 0 full effect.
 
 
 ;;;;; STATES
@@ -431,6 +438,7 @@ rcvBrake                            alias      user54           			; Brake pedal
 faultCNTGearChange                  alias      user55                     	; Counts number of times gear change has fault    
 lastRPMThreshold					alias	   user56						; Holds the last threshold of change in RPM during a gear change. Used for displaying correct speed in infotainment.
 manualSmeshControl					alias	   user57						; 0 if smesh is controlled automatically, 1 when controlled manually
+maxVehicleSpeedCorrected			alias	   user58
 
 
 ; Temperature
@@ -707,6 +715,7 @@ maxVehicleSpeedCorrected = get_muldiv(MTD1, 255, (100-SPEED_CORRECTION_PERC), 10
 
 ; Set default values for battery params, so no safety measure is enabled by default
 call setBatteryDefaultParam
+; call setupManualThrottle
 
 ; For testing purposes, model inputs
 rcvSteerangle = 125
@@ -936,7 +945,7 @@ startupCANSystem:
 
     setup_mailbox(MAILBOX_DRVSEN_RCV, 0, 0, MAILBOX_DRVSEN_RCV_addr, C_EVENT, C_RCV, 0, 0)
     setup_mailbox_data(MAILBOX_DRVSEN_RCV, 1, 		; Efficiency
-        @rcvThrottle,					; Throttle pedal
+        rcvThrottle,					; Throttle pedal (rcvThrottle)
         0,
 		0,
 		0,
@@ -1202,6 +1211,9 @@ startupCANSystem:
 
 
 CheckCANMailboxes:
+
+	; Manual throttle
+	; rcvThrottle=OS_Throttle;
     
     ; Set correct variables to send
     interlockXMT = Interlock_State
@@ -1733,9 +1745,9 @@ setup2DMap:
         
     ; Steering angle compensation
     setup_map(angle2MultiplierMap, 3,      ; Number of points
-        0, MAX_STEER_COMPENSATION,      ; Steering to the left
+      MIN_STEER_VALUE, MAX_STEER_COMPENSATION,      ; Steering to the left
       125, 255,                         ; 
-      250, MAX_STEER_COMPENSATION,      ; Steering to the right
+      MAX_STEER_VALUE, MAX_STEER_COMPENSATION,      ; Steering to the right
         0, 0,
         0, 0,
         0, 0,
@@ -2240,16 +2252,23 @@ DNRStateMachine:
     
     if (rcvSteerangle > (125+STEER_ANGLE_NO_EFFECT)) {
         ; Steering to right
-        riSteeringMultiplier = get_map_output(angle2MultiplierMap, rcvSteerangle)
+		MAX_STEER_COMPENSATION = map_two_points(vehicle_speed, 0, STR_HIGH_SP, 0, STEER_COMPENSATION_HIGH_SP)
+		riSteeringMultiplier = map_two_points(rcvSteerangle, 125, MAX_STEER_VALUE, 255, MAX_STEER_COMPENSATION)
+		leSteeringMultiplier=255
         
         riMcThrottleTemp = get_muldiv(MTD1, riMcThrottleTemp, riSteeringMultiplier, 255)
         
     } else if (rcvSteerangle < (125-STEER_ANGLE_NO_EFFECT)) {
         ; Steering to left
-        leSteeringMultiplier = get_map_output(angle2MultiplierMap, rcvSteerangle)
+		MAX_STEER_COMPENSATION = map_two_points(vehicle_speed, 0, STR_HIGH_SP, 0, STEER_COMPENSATION_HIGH_SP)
+		leSteeringMultiplier = map_two_points(rcvSteerangle, MIN_STEER_VALUE, 125, MAX_STEER_COMPENSATION, 255)
+		riSteeringMultiplier=255
         
         leMcThrottleTemp = get_muldiv(MTD1, leMcThrottleTemp, leSteeringMultiplier, 255)
-    }
+    } else {
+		riSteeringMultiplier=255
+		leSteeringMultiplier=255
+	}
     
     
     if (rcvBrake = 1) {
@@ -2262,6 +2281,7 @@ DNRStateMachine:
     
     vcl_throttle = leMcThrottleTemp
     riMcThrottleComp = riMcThrottleTemp
+	;riMcThrottleComp = leMcThrottleTemp
     
     
     ; Set right DNR equal to left DNR
@@ -2558,6 +2578,15 @@ setSmeshTo118:
     }
     
     return
+	
+	
+setupManualThrottle:
+	Throttle_Type=3
+	Throttle_Filter=16000
+	VCL_Throttle_Enable=ON
+	
+	
+	return
 
     
 
