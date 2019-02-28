@@ -170,12 +170,12 @@ RPM_THRES_16to118				constant    400     ; RPM where smesh is going to 1:18, whe
 THROT_THRES_16to118             constant    100     ; 20-150 if throttle signal is higher than this threshold, smesh changes to 1:6 when speed is lower than threshold
 
 ; Throttle input signal -> output signal config
-; MANUAL: THROTTLE_INPUT_L				constant	2000		; Threshold of the input signal from throttle. Minimum input signal
-; MANUAL: THROTTLE_INPUT_M				constant	3000		; First part of the throttle input signal will have another ramp on the input -> output map
-; MANUAL: THROTTLE_INPUT_H				constant	3700		; Threshold of the input signal from throttle. Maximum input signal, max throttle
-THROTTLE_INPUT_L				constant	25		; Threshold of the input signal from throttle. Minimum input signal
-THROTTLE_INPUT_M				constant	65		; First part of the throttle input signal will have another ramp on the input -> output map
-THROTTLE_INPUT_H				constant	145		; Threshold of the input signal from throttle. Maximum input signal, max throttle
+THROTTLE_INPUT_L				constant	2000		; Threshold of the input signal from throttle. Minimum input signal
+THROTTLE_INPUT_M				constant	3000		; First part of the throttle input signal will have another ramp on the input -> output map
+THROTTLE_INPUT_H				constant	3700		; Threshold of the input signal from throttle. Maximum input signal, max throttle
+; THROTTLE_INPUT_L				constant	25		; Threshold of the input signal from throttle. Minimum input signal
+; THROTTLE_INPUT_M				constant	65		; First part of the throttle input signal will have another ramp on the input -> output map
+; THROTTLE_INPUT_H				constant	145		; Threshold of the input signal from throttle. Maximum input signal, max throttle
 THROTTLE_OUTPUT_M				constant	16000	; The ouput when the input has value THROTTLE_INPUT_M. Value between 0-32767
 
 ; Display speed correctly while changing gear
@@ -715,7 +715,7 @@ maxVehicleSpeedCorrected = get_muldiv(MTD1, 255, (100-SPEED_CORRECTION_PERC), 10
 
 ; Set default values for battery params, so no safety measure is enabled by default
 call setBatteryDefaultParam
-; call setupManualThrottle
+call setupManualThrottle
 
 ; For testing purposes, model inputs
 rcvSteerangle = 125
@@ -945,7 +945,7 @@ startupCANSystem:
 
     setup_mailbox(MAILBOX_DRVSEN_RCV, 0, 0, MAILBOX_DRVSEN_RCV_addr, C_EVENT, C_RCV, 0, 0)
     setup_mailbox_data(MAILBOX_DRVSEN_RCV, 1, 		; Efficiency
-        rcvThrottle,					; Throttle pedal (rcvThrottle)
+        0,					; Throttle pedal (rcvThrottle)
         0,
 		0,
 		0,
@@ -1213,7 +1213,7 @@ startupCANSystem:
 CheckCANMailboxes:
 
 	; Manual throttle
-	; rcvThrottle=OS_Throttle;
+	rcvThrottle=OS_Throttle;
     
     ; Set correct variables to send
     interlockXMT = Interlock_State
